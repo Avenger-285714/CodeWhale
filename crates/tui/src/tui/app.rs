@@ -728,7 +728,7 @@ fn match_kitty_csi_fragment(chars: &[char], start: usize) -> Option<usize> {
     None
 }
 
-const MAX_SUBMITTED_INPUT_CHARS: usize = 16_000;
+const MAX_SUBMITTED_INPUT_CHARS: usize = 32_000;
 const MAX_DRAFT_HISTORY: usize = 50;
 
 impl AppMode {
@@ -4218,6 +4218,9 @@ impl App {
     /// pointing at it so the model can read the full content via the
     /// normal file-mention resolution path (#553).
     fn consolidate_large_input(&mut self) {
+        self.status_message = Some("Consolidating large paste to file…".to_string());
+        self.needs_redraw = true;
+
         let full_input = std::mem::take(&mut self.input);
         self.cursor_position = 0;
 
