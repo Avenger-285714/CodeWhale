@@ -265,7 +265,7 @@ pub struct McpServerConfig {
     /// Header keys and values are passed through as-is — we do not
     /// substitute environment variables in v0.8.31. If you store a
     /// real token here, the value lives in plain text in
-    /// `~/.deepseek/mcp.json`; treat that file with the same care
+    /// `~/.codewhale/mcp.json`; treat that file with the same care
     /// as any other secret-bearing config.
     #[serde(default)]
     #[serde(skip_serializing_if = "HashMap::is_empty")]

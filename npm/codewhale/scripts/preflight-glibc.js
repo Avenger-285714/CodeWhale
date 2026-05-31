@@ -115,7 +115,7 @@ function preflightGlibc(filePath) {
   if (compareVersion(host, required) < 0) {
     throw new Error(
       [
-        `Prebuilt DeepSeek TUI binary requires GLIBC_${formatVersion(required)} but this system has glibc ${formatVersion(host)}.`,
+        `Prebuilt CodeWhale binary requires GLIBC_${formatVersion(required)} but this system has glibc ${formatVersion(host)}.`,
         "Older distros (CentOS 7/8, RHEL 7/8, Debian 10, etc.) ship an older glibc that is not compatible with the prebuilt artifact.",
         "",
         buildFromSourceHint(),

@@ -7,9 +7,7 @@
 //! - pinned message indices that compaction should preserve
 
 use crate::models::{ContentBlock, Message};
-use crate::workspace_discovery::{
-    DISCOVERY_ALWAYS_DIRS, path_is_excluded_from_discovery, should_skip_unignored_discovery_entry,
-};
+use crate::workspace_discovery::{DISCOVERY_ALWAYS_DIRS, should_skip_unignored_discovery_entry};
 use ignore::WalkBuilder;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -137,13 +135,13 @@ impl Workspace {
                 .git_ignore(false)
                 .ignore(false)
                 .max_depth(Some(5));
+            let root_for_filter = self.root.clone();
+            dot_builder.filter_entry(move |entry| {
+                !should_skip_unignored_discovery_entry(&root_for_filter, entry.path())
+            });
             for entry in dot_builder.build().flatten() {
                 if total >= FILE_INDEX_MAX_ENTRIES {
                     break;
-                }
-                // Exclude machine-generated bulk (e.g. .deepseek/snapshots/).
-                if path_is_excluded_from_discovery(&self.root, entry.path()) {
-                    continue;
                 }
                 if entry
                     .file_type()
@@ -314,16 +312,15 @@ fn walk_always_discoverable_dirs(
         if let Some(depth) = max_depth {
             builder.max_depth(Some(depth.saturating_sub(1)));
         }
+        let root_for_filter = walk_root.to_path_buf();
+        builder.filter_entry(move |entry| {
+            !should_skip_unignored_discovery_entry(&root_for_filter, entry.path())
+        });
         for entry in builder.build().flatten() {
             if prefix_hits.len() + substring_hits.len() >= limit {
                 break;
             }
             let path = entry.path();
-            // Exclude machine-generated bulk (e.g. .deepseek/snapshots/)
-            // even though gitignore is disabled for this walk.
-            if path_is_excluded_from_discovery(walk_root, path) {
-                continue;
-            }
             let Ok(rel) = path.strip_prefix(display_root) else {
                 continue;
             };
@@ -1512,6 +1509,12 @@ mod tests {
         .unwrap();
         std::fs::create_dir_all(root.join(".claude/commands")).unwrap();
         std::fs::write(root.join(".claude/commands/keep.md"), "command").unwrap();
+        std::fs::create_dir_all(root.join(".claude/commands/node_modules/pkg")).unwrap();
+        std::fs::write(
+            root.join(".claude/commands/node_modules/pkg/generated.js"),
+            "module",
+        )
+        .unwrap();
 
         std::fs::create_dir_all(root.join(".generated/specs")).unwrap();
         std::fs::write(root.join(".generated/specs/device-layout.md"), "layout").unwrap();
@@ -1549,6 +1552,12 @@ mod tests {
                 .any(|entry| entry == ".claude/commands/keep.md"),
             "normal .claude command files should still complete: {command_entries:?}",
         );
+        assert!(
+            command_entries
+                .iter()
+                .all(|entry| !entry.contains("/node_modules/")),
+            "dot-dir build/dependency bulk must stay out of completions: {command_entries:?}",
+        );
 
         assert!(
             ws.resolve("worktree-only.rs").is_err(),
@@ -1557,6 +1566,10 @@ mod tests {
         assert!(
             ws.resolve("agent-only.md").is_err(),
             "fuzzy resolution must not index files from .claude/worktrees"
+        );
+        assert!(
+            ws.resolve("generated.js").is_err(),
+            "fuzzy resolution must not index files from dot-dir dependency folders"
         );
         assert!(ws.resolve("keep.md").is_ok());
     }

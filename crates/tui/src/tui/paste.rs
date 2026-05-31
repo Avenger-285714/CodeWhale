@@ -49,15 +49,17 @@ pub fn handle_paste_burst_key(app: &mut App, key: &KeyEvent, now: Instant) -> bo
         }
         KeyCode::Char(c) if !has_ctrl_alt_or_super => {
             if !c.is_ascii() {
+                // IME-committed characters (Chinese, Japanese, Korean) arrive
+                // as individual KeyCode::Char events. Route them directly to
+                // the composer so the paste-burst buffer cannot swallow slow
+                // commits, while still extending the Enter-suppression window
+                // for rapid non-ASCII paste streams on terminals without
+                // bracketed paste.
                 if let Some(pending) = app.paste_burst.flush_before_modified_input() {
                     app.insert_str(&pending);
                 }
-                if app.paste_burst.try_append_char_if_active(c, now) {
-                    return true;
-                }
-                if let Some(decision) = app.paste_burst.on_plain_char_no_hold(now) {
-                    return handle_paste_burst_decision(app, decision, c, now);
-                }
+                app.paste_burst.note_plain_char(now);
+                app.paste_burst.extend_window(now);
                 app.insert_char(c);
                 return true;
             }
@@ -169,9 +171,9 @@ mod tests {
     fn raw_short_cjk_multiline_paste_buffers_enter_instead_of_submitting() {
         // #1302: pasting short CJK content like "请联网搜索：\nSTM32 …" used
         // to silently submit the first line because the heuristic decided
-        // it wasn't paste-like (no whitespace + under 16 chars). The
-        // non-ASCII bypass now classifies it as a paste so the Enter is
-        // absorbed into the burst buffer.
+        // it wasn't paste-like (no whitespace + under 16 chars). Non-ASCII
+        // chars now insert directly; the Enter is absorbed by the suppression
+        // window opened by extend_window.
         let mut app = test_app();
         let t0 = Instant::now();
 
@@ -190,10 +192,6 @@ mod tests {
             );
         }
 
-        assert!(app.flush_paste_burst_if_due(
-            t0 + Duration::from_millis(pasted.chars().count() as u64)
-                + crate::tui::paste_burst::PasteBurst::recommended_active_flush_delay()
-        ));
         assert_eq!(app.input, pasted);
     }
 
@@ -277,6 +275,24 @@ mod tests {
             app.cursor_position, 4,
             "cursor advances by one per codepoint, not per UTF-8 byte"
         );
+    }
+
+    #[test]
+    fn ime_char_flushes_pending_ascii_before_direct_insert() {
+        let mut app = test_app();
+        let t0 = Instant::now();
+
+        assert!(handle_paste_burst_key(&mut app, &plain('a'), t0));
+        assert_eq!(app.input, "");
+
+        assert!(handle_paste_burst_key(
+            &mut app,
+            &plain('你'),
+            t0 + Duration::from_millis(50)
+        ));
+
+        assert_eq!(app.input, "a你");
+        assert_eq!(app.cursor_position, 2);
     }
 
     /// Pin the bracketed-paste contract for CJK content: pasted

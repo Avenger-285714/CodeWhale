@@ -2,7 +2,8 @@
 //!
 //! Automations are local-first recurring jobs that enqueue standard background
 //! tasks. This module stores automation definitions and run history under
-//! `~/.deepseek/automations` (or `DEEPSEEK_AUTOMATIONS_DIR` override).
+//! `~/.codewhale/automations` with a `~/.deepseek/automations` fallback (or
+//! `DEEPSEEK_AUTOMATIONS_DIR` override).
 
 use std::collections::BTreeMap;
 use std::fs;

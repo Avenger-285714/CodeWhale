@@ -1209,7 +1209,10 @@ background_color = "#1A1B26"
 
     #[test]
     fn session_only_apply_keeps_runtime_overrides_and_skips_reload() {
-        let _lock = lock_test_env();
+        // Isolate `Settings::load()` from the developer's real provider config
+        // (e.g. `provider = "openrouter"`), which otherwise provider-prefixes
+        // the applied model id and breaks this assertion on a dev machine.
+        let _env = crate::test_support::isolated_config_env();
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
@@ -1265,7 +1268,10 @@ mcp_config_path = "disk-mcp.json"
 
     #[test]
     fn status_item_only_apply_does_not_require_engine_sync() {
-        let _lock = lock_test_env();
+        // Isolate `Settings::load()` from the developer's real provider config;
+        // a non-Deepseek provider normalizes the model id and spuriously flips
+        // `requires_engine_sync` on a status-items-only apply.
+        let _env = crate::test_support::isolated_config_env();
         let mut app = app();
         let mut config = Config::default();
         let mut doc = build_document(&app, &config).expect("document");

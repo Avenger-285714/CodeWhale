@@ -32,6 +32,10 @@ use ratatui::{
     widgets::Block,
 };
 use tracing;
+#[cfg(windows)]
+use windows::Win32::System::Console::{
+    CONSOLE_MODE, GetConsoleMode, GetStdHandle, STD_INPUT_HANDLE, SetConsoleMode,
+};
 
 use crate::audit::log_sensitive_event;
 use crate::automation_manager::{AutomationManager, AutomationSchedulerConfig, spawn_scheduler};
@@ -178,6 +182,7 @@ const REQUIRED_RELEASE_ASSETS: &[&str] = &[
     "codewhale-tui-macos-arm64",
     "codewhale-tui-macos-x64",
     "codewhale-tui-windows-x64.exe",
+    "codewhale.bat",
     "codewhale-windows-x64.exe",
     "codewhale-windows-x64-portable.zip",
     "codewhale-windows-x64.zip",
@@ -305,6 +310,9 @@ pub async fn run_tui(config: &Config, options: TuiOptions) -> Result<()> {
             ));
         }
     }
+
+    #[cfg(windows)]
+    enable_windows_ime_console_mode();
 
     let mut stdout = io::stdout();
     if use_alt_screen {
@@ -1987,14 +1995,13 @@ async fn run_event_loop(
                                 maybe_add_patch_preview(app, &input);
                             }
 
-                            // Create approval request and show overlay
-                            let request = ApprovalRequest::new_with_workspace(
+                            let request = approval_request_from_event_input(
+                                app,
                                 &id,
                                 &tool_name,
                                 &description,
                                 &input,
                                 &approval_key,
-                                Some(app.workspace.display().to_string()),
                             );
                             log_sensitive_event(
                                 "tool.approval.prompted",
@@ -2609,7 +2616,7 @@ async fn run_event_loop(
                                     // `Config` reference so any future clone
                                     // (e.g. a subsequent /provider switch)
                                     // sees it; the explicit-override path
-                                    // in `deepseek_api_key` (#343) makes
+                                    // in `active_provider_api_key` (#343) makes
                                     // this win immediately.
                                     config.api_key = Some(key.clone());
                                     let mut refreshed_config = config.clone();
@@ -3939,6 +3946,25 @@ fn queued_session_to_ui(msg: QueuedSessionMessage) -> QueuedMessage {
     }
 }
 
+/// Finalize in-flight UI state when the turn has stalled and the
+/// watchdog is forcing recovery.  Shared by Branch 3 and Branch 3b.
+fn finalize_stalled_turn(app: &mut App, toast_msg: &str) {
+    streaming_thinking::finalize_current(app);
+    app.finalize_streaming_assistant_as_interrupted();
+    app.finalize_active_cell_as_interrupted();
+    app.streaming_state.reset();
+    app.streaming_message_index = None;
+    app.streaming_thinking_active_entry = None;
+
+    app.is_loading = false;
+    app.turn_started_at = None;
+    app.runtime_turn_status = None;
+    app.runtime_turn_id = None;
+    app.dispatch_started_at = None;
+    app.user_scrolled_during_stream = false;
+    app.push_status_toast(toast_msg, StatusToastLevel::Error, None);
+}
+
 fn reconcile_turn_liveness(app: &mut App, now: Instant, has_running_agents: bool) -> bool {
     if app.is_loading
         && app.runtime_turn_status.is_none()
@@ -3978,6 +4004,7 @@ fn reconcile_turn_liveness(app: &mut App, now: Instant, has_running_agents: bool
 
     // Branch 3: turn started but never completed — engine may have
     // panicked, sub-agent may be stuck, or the completion event was lost.
+    // Only fires when NO sub-agents are running (the engine itself is dead).
     if app.is_loading
         && matches!(app.runtime_turn_status.as_deref(), Some("in_progress"))
         && !has_running_agents
@@ -3986,26 +4013,30 @@ fn reconcile_turn_liveness(app: &mut App, now: Instant, has_running_agents: bool
             now.saturating_duration_since(started) > TURN_STALL_WATCHDOG_TIMEOUT
         })
     {
-        // Finalize in-flight thinking / assistant / tool cells so the
-        // transcript doesn't show permanent spinners after recovery.
-        streaming_thinking::finalize_current(app);
-        app.finalize_streaming_assistant_as_interrupted();
-        app.finalize_active_cell_as_interrupted();
-        app.streaming_state.reset();
-        app.streaming_message_index = None;
-        app.streaming_thinking_active_entry = None;
-
-        app.is_loading = false;
-        app.turn_started_at = None;
-        app.runtime_turn_status = None;
-        app.runtime_turn_id = None;
-        app.dispatch_started_at = None;
-        // Per-turn scroll lock — clear so the next turn auto-scrolls.
-        app.user_scrolled_during_stream = false;
-        app.push_status_toast(
+        finalize_stalled_turn(
+            app,
             "Turn stalled — no completion signal received. Please try again.",
-            StatusToastLevel::Error,
-            None,
+        );
+        return true;
+    }
+
+    // Branch 3b: sub-agents appear to be running but the turn has made no
+    // progress for an extended period.  This catches the case where children
+    // are stuck (deadlocked, rate-limited, or the engine stopped polling
+    // completions).  Uses a longer timeout than Branch 3 to avoid
+    // false-firing on legitimately slow sub-agents.
+    const SUBAGENT_STALL_TIMEOUT: Duration = Duration::from_secs(600); // 10 min
+    if app.is_loading
+        && matches!(app.runtime_turn_status.as_deref(), Some("in_progress"))
+        && has_running_agents
+        && !app.is_compacting
+        && app
+            .turn_started_at
+            .is_some_and(|started| now.saturating_duration_since(started) > SUBAGENT_STALL_TIMEOUT)
+    {
+        finalize_stalled_turn(
+            app,
+            "Sub-agent(s) appear stuck — no progress for 10+ minutes. Please try again.",
         );
         return true;
     }
@@ -4214,6 +4245,24 @@ fn replace_matching_assistant_text(
 fn build_queued_message(app: &mut App, input: String) -> QueuedMessage {
     let skill_instruction = app.active_skill.take();
     QueuedMessage::new(input, skill_instruction)
+}
+
+fn approval_request_from_event_input(
+    app: &App,
+    id: &str,
+    tool_name: &str,
+    description: &str,
+    input: &serde_json::Value,
+    approval_key: &str,
+) -> ApprovalRequest {
+    ApprovalRequest::new_with_workspace(
+        id,
+        tool_name,
+        description,
+        input,
+        approval_key,
+        Some(app.workspace.display().to_string()),
+    )
 }
 
 fn queue_current_draft_for_next_turn(app: &mut App) -> bool {
@@ -7066,6 +7115,8 @@ fn resume_terminal(
     sync_output_enabled: bool,
 ) -> Result<()> {
     enable_raw_mode()?;
+    #[cfg(windows)]
+    enable_windows_ime_console_mode();
     if use_alt_screen {
         execute!(terminal.backend_mut(), EnterAlternateScreen)?;
         crate::logging::suppress_for_tui_alt_screen();
@@ -7185,6 +7236,30 @@ pub fn emergency_restore_terminal() {
     crate::logging::restore_after_tui_alt_screen();
 }
 
+/// crossterm clears ENABLE_WINDOW_INPUT when entering raw mode on Windows.
+/// Restoring it lets CJK IME composition commit characters in consoles that
+/// need window-input events for composition updates.
+#[cfg(windows)]
+fn enable_windows_ime_console_mode() {
+    const ENABLE_WINDOW_INPUT: CONSOLE_MODE = CONSOLE_MODE(0x0008);
+
+    // SAFETY: These Win32 console calls only read and update the current
+    // process input handle mode. Any failure is ignored because this is a
+    // best-effort compatibility tweak after raw mode setup.
+    unsafe {
+        let Ok(handle) = GetStdHandle(STD_INPUT_HANDLE) else {
+            return;
+        };
+        let mut mode = CONSOLE_MODE(0);
+        if GetConsoleMode(handle, &mut mode).is_err() {
+            return;
+        }
+        if mode.0 & ENABLE_WINDOW_INPUT.0 == 0 {
+            let _ = SetConsoleMode(handle, mode | ENABLE_WINDOW_INPUT);
+        }
+    }
+}
+
 /// Re-establish terminal mode flags. Idempotent and best-effort: each
 /// underlying flag is silently discarded by terminals that don't support
 /// it, and a single flag's failure doesn't prevent later flags from being
@@ -7209,6 +7284,9 @@ fn recover_terminal_modes<W: Write>(
     use_mouse_capture: bool,
     use_bracketed_paste: bool,
 ) {
+    #[cfg(windows)]
+    enable_windows_ime_console_mode();
+
     push_keyboard_enhancement_flags(writer);
     if use_mouse_capture && let Err(err) = execute!(writer, EnableMouseCapture) {
         tracing::debug!(?err, "EnableMouseCapture ignored");

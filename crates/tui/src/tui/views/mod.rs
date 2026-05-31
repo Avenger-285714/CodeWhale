@@ -623,7 +623,7 @@ impl ConfigView {
                 section: ConfigSection::Model,
                 key: "base_url".to_string(),
                 value: Config::load(app.config_path.clone(), app.config_profile.as_deref())
-                    .map(|config| config.deepseek_base_url())
+                    .map(|config| config.active_provider_base_url())
                     .unwrap_or_else(|_| "(unavailable)".to_string()),
                 editable: true,
                 scope: ConfigScope::Saved,

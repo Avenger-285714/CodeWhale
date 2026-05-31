@@ -88,11 +88,14 @@ impl Default for ModelRegistry {
                 supports_reasoning: true,
             },
             ModelInfo {
-                id: "deepseek-reasoner".to_string(),
+                id: "deepseek-v4-pro".to_string(),
                 provider: ProviderKind::WanjieArk,
                 aliases: vec![
+                    "deepseek-reasoner".to_string(),
                     "wanjie-deepseek-reasoner".to_string(),
                     "ark-wanjie-deepseek-reasoner".to_string(),
+                    "wanjie-deepseek-v4-pro".to_string(),
+                    "ark-wanjie-deepseek-v4-pro".to_string(),
                 ],
                 supports_tools: true,
                 supports_reasoning: true,
@@ -397,12 +400,12 @@ mod tests {
     }
 
     #[test]
-    fn wanjie_ark_default_uses_reasoner_model_id() {
+    fn wanjie_ark_default_uses_v4_pro_model_id() {
         let registry = ModelRegistry::default();
         let resolved = registry.resolve(None, Some(ProviderKind::WanjieArk));
 
         assert_eq!(resolved.resolved.provider, ProviderKind::WanjieArk);
-        assert_eq!(resolved.resolved.id, "deepseek-reasoner");
+        assert_eq!(resolved.resolved.id, "deepseek-v4-pro");
         assert!(resolved.resolved.supports_reasoning);
     }
 

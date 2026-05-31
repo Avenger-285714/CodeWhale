@@ -2,6 +2,7 @@ const path = require("path");
 const os = require("os");
 
 const CHECKSUM_MANIFEST = "codewhale-artifacts-sha256.txt";
+const WINDOWS_LAUNCHER_ASSET = "codewhale.bat";
 
 const ASSET_MATRIX = {
   linux: {
@@ -13,7 +14,7 @@ const ASSET_MATRIX = {
     arm64: ["codewhale-macos-arm64", "codewhale-tui-macos-arm64"],
   },
   win32: {
-    x64: ["codewhale-windows-x64.exe", "codewhale-tui-windows-x64.exe"],
+    x64: ["codewhale-windows-x64.exe", "codewhale-tui-windows-x64.exe", WINDOWS_LAUNCHER_ASSET],
   },
 };
 
@@ -111,8 +112,8 @@ function releaseBinaryDirectory() {
 function allAssetNames() {
   const names = [];
   for (const platformAssets of Object.values(ASSET_MATRIX)) {
-    for (const pair of Object.values(platformAssets)) {
-      names.push(pair[0], pair[1]);
+    for (const assets of Object.values(platformAssets)) {
+      names.push(...assets);
     }
   }
   return Array.from(new Set(names));
@@ -122,14 +123,30 @@ function allReleaseAssetNames() {
   return [...allAssetNames(), CHECKSUM_MANIFEST];
 }
 
+function windowsLauncherContent() {
+  return [
+    "@echo off",
+    'set "NO_ANIMATIONS=1"',
+    "where wt >nul 2>nul",
+    'if "%ERRORLEVEL%"=="0" (',
+    '    wt --title CodeWhale cmd /k "set NO_ANIMATIONS=1 && ""%~dp0codewhale-windows-x64.exe"" %*"',
+    ") else (",
+    '    "%~dp0codewhale-windows-x64.exe" %*',
+    ")",
+    "",
+  ].join("\r\n");
+}
+
 module.exports = {
   allAssetNames,
   allReleaseAssetNames,
   CHECKSUM_MANIFEST,
+  WINDOWS_LAUNCHER_ASSET,
   checksumManifestUrl,
   detectBinaryNames,
   executableName,
   releaseAssetUrl,
   releaseBaseUrl,
   releaseBinaryDirectory,
+  windowsLauncherContent,
 };

@@ -23,7 +23,7 @@ const DEFAULT_NVIDIA_NIM_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_ATLASCLOUD_MODEL: &str = "deepseek-ai/deepseek-v4-flash";
 const DEFAULT_ATLASCLOUD_BASE_URL: &str = "https://api.atlascloud.ai/v1";
-const DEFAULT_WANJIE_ARK_MODEL: &str = "deepseek-reasoner";
+const DEFAULT_WANJIE_ARK_MODEL: &str = "deepseek-v4-pro";
 const DEFAULT_WANJIE_ARK_BASE_URL: &str = "https://maas-openapi.wanjiedata.com/api/v1";
 const DEFAULT_OPENROUTER_MODEL: &str = "deepseek/deepseek-v4-pro";
 const DEFAULT_OPENROUTER_FLASH_MODEL: &str = "deepseek/deepseek-v4-flash";
@@ -46,7 +46,26 @@ const DEFAULT_VLLM_BASE_URL: &str = "http://localhost:8000/v1";
 const DEFAULT_OLLAMA_MODEL: &str = "deepseek-coder:1.3b";
 const DEFAULT_OLLAMA_BASE_URL: &str = "http://localhost:11434/v1";
 const DEFAULT_XIAOMI_MODEL: &str = "mimo-v2.5-pro";
-const DEFAULT_XIAOMI_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1";
+// MiMo Token Plan regional clusters (OpenAI-compatible). CN is the default.
+const XIAOMI_CN_BASE_URL: &str = "https://token-plan-cn.xiaomimimo.com/v1";
+const XIAOMI_SGP_BASE_URL: &str = "https://token-plan-sgp.xiaomimimo.com/v1";
+const XIAOMI_AMS_BASE_URL: &str = "https://token-plan-ams.xiaomimimo.com/v1";
+const DEFAULT_XIAOMI_BASE_URL: &str = XIAOMI_CN_BASE_URL;
+
+/// Resolve the MiMo (Xiaomi) Token Plan base URL for a named regional cluster.
+///
+/// `cn` (default), `sgp` (Singapore), or `ams` (Amsterdam). Any unknown or
+/// missing value falls back to the China cluster. An explicit `base_url` in
+/// config or `MIMO_BASE_URL` still overrides this — the cluster only chooses
+/// among the official defaults.
+#[must_use]
+pub fn xiaomi_base_url_for_cluster(cluster: Option<&str>) -> &'static str {
+    match cluster.map(|c| c.trim().to_ascii_lowercase()).as_deref() {
+        Some("sgp") | Some("singapore") => XIAOMI_SGP_BASE_URL,
+        Some("ams") | Some("amsterdam") => XIAOMI_AMS_BASE_URL,
+        _ => XIAOMI_CN_BASE_URL,
+    }
+}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -140,6 +159,11 @@ pub struct ProviderConfigToml {
     /// versioning logic applies.
     #[serde(default)]
     pub path_suffix: Option<String>,
+    /// MiMo (Xiaomi) Token Plan regional cluster: `cn` (default), `sgp`
+    /// (Singapore), or `ams` (Amsterdam). Selects the official base URL when
+    /// `base_url` is not set explicitly. Ignored by non-Xiaomi providers.
+    #[serde(default)]
+    pub cluster: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -1086,7 +1110,9 @@ impl ConfigToml {
                 ProviderKind::Sglang => DEFAULT_SGLANG_BASE_URL.to_string(),
                 ProviderKind::Vllm => DEFAULT_VLLM_BASE_URL.to_string(),
                 ProviderKind::Ollama => DEFAULT_OLLAMA_BASE_URL.to_string(),
-                ProviderKind::Xiaomi => DEFAULT_XIAOMI_BASE_URL.to_string(),
+                ProviderKind::Xiaomi => {
+                    xiaomi_base_url_for_cluster(provider_cfg.cluster.as_deref()).to_string()
+                }
             });
         // CLI flag wins outright. Otherwise: config-file → injected secrets/env.
         // This makes `deepseek auth set` a reliable fix even when the user's
@@ -1638,7 +1664,7 @@ pub fn codewhale_home() -> Result<PathBuf> {
             return Ok(PathBuf::from(trimmed));
         }
     }
-    let home = dirs::home_dir().context("failed to resolve home directory")?;
+    let home = effective_user_home().context("failed to resolve home directory")?;
     Ok(home.join(CODEWHALE_APP_DIR))
 }
 
@@ -1646,8 +1672,15 @@ pub fn codewhale_home() -> Result<PathBuf> {
 ///
 /// Always returns the legacy path regardless of whether it exists.
 pub fn legacy_deepseek_home() -> Result<PathBuf> {
-    let home = dirs::home_dir().context("failed to resolve home directory")?;
+    let home = effective_user_home().context("failed to resolve home directory")?;
     Ok(home.join(LEGACY_APP_DIR))
+}
+
+fn effective_user_home() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
 }
 
 /// Resolve a state subdirectory, preferring the CodeWhale root if
@@ -2008,6 +2041,36 @@ mod tests {
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    }
+
+    #[test]
+    fn app_homes_prefer_home_env_before_os_home() {
+        let _lock = env_lock();
+        let old_home = env::var_os("HOME");
+        let old_codewhale_home = env::var_os("CODEWHALE_HOME");
+        let home =
+            env::temp_dir().join(format!("codewhale-config-home-env-{}", std::process::id()));
+
+        // Safety: serialized test-only environment mutation.
+        unsafe {
+            env::set_var("HOME", &home);
+            env::remove_var("CODEWHALE_HOME");
+        }
+
+        assert_eq!(codewhale_home().unwrap(), home.join(CODEWHALE_APP_DIR));
+        assert_eq!(legacy_deepseek_home().unwrap(), home.join(LEGACY_APP_DIR));
+
+        // Safety: restore under the env mutex.
+        unsafe {
+            match old_home {
+                Some(value) => env::set_var("HOME", value),
+                None => env::remove_var("HOME"),
+            }
+            match old_codewhale_home {
+                Some(value) => env::set_var("CODEWHALE_HOME", value),
+                None => env::remove_var("CODEWHALE_HOME"),
+            }
+        }
     }
 
     #[test]
@@ -3535,5 +3598,50 @@ mod tests {
         let resolved = ConfigToml::default().resolve_runtime_options_with_secrets(&cli, &secrets);
         assert_eq!(resolved.api_key.as_deref(), Some("cli-key"));
         assert_eq!(resolved.api_key_source, Some(RuntimeApiKeySource::Cli));
+    }
+
+    #[test]
+    fn xiaomi_cluster_resolves_official_base_urls() {
+        assert_eq!(xiaomi_base_url_for_cluster(None), XIAOMI_CN_BASE_URL);
+        assert_eq!(xiaomi_base_url_for_cluster(Some("cn")), XIAOMI_CN_BASE_URL);
+        assert_eq!(
+            xiaomi_base_url_for_cluster(Some("sgp")),
+            XIAOMI_SGP_BASE_URL
+        );
+        assert_eq!(
+            xiaomi_base_url_for_cluster(Some(" SGP ")),
+            XIAOMI_SGP_BASE_URL
+        );
+        assert_eq!(
+            xiaomi_base_url_for_cluster(Some("ams")),
+            XIAOMI_AMS_BASE_URL
+        );
+        // Unknown clusters fall back to the China default rather than erroring.
+        assert_eq!(
+            xiaomi_base_url_for_cluster(Some("moon")),
+            XIAOMI_CN_BASE_URL
+        );
+    }
+
+    #[test]
+    fn xiaomi_cluster_selects_base_url_during_resolution() {
+        let _g = EnvGuard::without_deepseek_runtime_overrides();
+        let secrets = Secrets::new(std::sync::Arc::new(
+            codewhale_secrets::InMemoryKeyringStore::new(),
+        ));
+        let mut cfg = ConfigToml {
+            provider: ProviderKind::Xiaomi,
+            ..ConfigToml::default()
+        };
+        cfg.providers.xiaomi.cluster = Some("sgp".to_string());
+        let resolved =
+            cfg.resolve_runtime_options_with_secrets(&CliRuntimeOverrides::default(), &secrets);
+        assert_eq!(resolved.base_url, XIAOMI_SGP_BASE_URL);
+
+        // An explicit base_url still wins over the cluster selection.
+        cfg.providers.xiaomi.base_url = Some("https://example.test/v1".to_string());
+        let resolved =
+            cfg.resolve_runtime_options_with_secrets(&CliRuntimeOverrides::default(), &secrets);
+        assert_eq!(resolved.base_url, "https://example.test/v1");
     }
 }

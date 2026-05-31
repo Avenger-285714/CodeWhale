@@ -45,7 +45,7 @@ docker build -t codewhale .
 
 docker run --rm -it \\
   -e DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY \\
-  -v ~/.deepseek:/home/codewhale/.deepseek \\
+  -v ~/.codewhale:/home/codewhale/.codewhale \\
   -v "$PWD:/work" -w /work \\
   codewhale`;
 
@@ -57,7 +57,7 @@ cargo build --release --locked
 cargo install --path crates/cli --locked   # codewhale
 cargo install --path crates/tui --locked   # codewhale-tui`;
 
-const CONFIG_TREE = `~/.deepseek/
+const CONFIG_TREE = `~/.codewhale/
 ├── config.toml      api keys, model, hooks, profiles
 ├── mcp.json         MCP server definitions
 ├── skills/          user skills (each with SKILL.md)
@@ -65,9 +65,11 @@ const CONFIG_TREE = `~/.deepseek/
 ├── tasks/           background task store
 └── audit.log        credential / approval / elevation audit trail
 
-./.deepseek/         project-scoped config (optional, per-repo)`;
+~/.deepseek/         legacy config fallback still supported
+./.codewhale/        project-scoped config (optional, per-repo)
+./.deepseek/         legacy project fallback`;
 
-const CONFIG_TREE_ZH = `~/.deepseek/
+const CONFIG_TREE_ZH = `~/.codewhale/
 ├── config.toml      API 密钥、模型、钩子、配置集
 ├── mcp.json         MCP 服务器定义
 ├── skills/          用户技能（每个含 SKILL.md）
@@ -75,7 +77,9 @@ const CONFIG_TREE_ZH = `~/.deepseek/
 ├── tasks/           后台任务存储
 └── audit.log        凭证 / 审批 / 提权审计日志
 
-./.deepseek/         项目级配置（可选，每个仓库）`;
+~/.deepseek/         仍支持的旧配置回退
+./.codewhale/        项目级配置（可选，每个仓库）
+./.deepseek/         旧项目级回退`;
 
 export default async function InstallPage({ params }: { params: Promise<{ locale: string }> }) {
   const { locale } = await params;
@@ -139,13 +143,13 @@ export default async function InstallPage({ params }: { params: Promise<{ locale
             <>
               <code className="inline">codewhale doctor</code> 检查 API 密钥、网络、沙箱可用性、
               MCP 服务器，并将完整报告写入{" "}
-              <code className="inline">~/.deepseek/doctor.log</code>。
+              <code className="inline">~/.codewhale/doctor.log</code>。
             </>
           ) : (
             <>
               <code className="inline">codewhale doctor</code> checks your API key, network,
               sandbox availability, and MCP servers. Full report is written to{" "}
-              <code className="inline">~/.deepseek/doctor.log</code>.
+              <code className="inline">~/.codewhale/doctor.log</code>.
             </>
           )}
         </p>
@@ -222,7 +226,7 @@ export default async function InstallPage({ params }: { params: Promise<{ locale
             <div className="space-y-2">
               <InstallCodeBlock cmd={SET_KEY_BASH} copyLabel={copyLabel} copiedLabel={copiedLabel} />
               <p className="text-xs text-ink-mute">
-                {isZh ? "或保存到 ~/.deepseek/config.toml：" : "Or persist it to ~/.deepseek/config.toml:"}
+                {isZh ? "或保存到 ~/.codewhale/config.toml：" : "Or persist it to ~/.codewhale/config.toml:"}
               </p>
               <InstallCodeBlock cmd={SET_KEY_AUTH} copyLabel={copyLabel} copiedLabel={copiedLabel} />
             </div>
@@ -403,16 +407,17 @@ export default async function InstallPage({ params }: { params: Promise<{ locale
         <p className="mt-4 text-sm text-ink-soft leading-relaxed max-w-2xl">
           {isZh ? (
             <>
-              项目级 <code className="inline">./.deepseek/</code> 目录是可选的——每个仓库可有独立的 MCP 服务器、钩子、
-              技能和配置覆盖（例如提供商密钥）。
+              项目级 <code className="inline">./.codewhale/</code> 目录是可选的——每个仓库可有独立的 MCP 服务器、钩子、
+              技能和配置覆盖。旧版 <code className="inline">./.deepseek/</code> 仍会作为回退读取。
               首次运行时，如果缺少配置文件，系统会询问是否交互式创建。
             </>
           ) : (
             <>
-              The project-scoped <code className="inline">./.deepseek/</code> directory is optional —
+              The project-scoped <code className="inline">./.codewhale/</code> directory is optional —
               each repo can carry its own MCP servers, hooks, skills, and config overrides (e.g.
-              provider keys). On first run the app asks whether to interactively create a config
-              file if one is missing.
+              provider keys). Legacy <code className="inline">./.deepseek/</code> config still works
+              as a fallback. On first run the app asks whether to interactively create a config file
+              if one is missing.
             </>
           )}
         </p>

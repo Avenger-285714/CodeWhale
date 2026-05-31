@@ -257,6 +257,13 @@ fn write_panic_dump(
     location: &std::panic::Location<'_>,
     message: &str,
 ) -> std::io::Result<()> {
+    // Allow tests to redirect crash dumps to a temp directory so they
+    // don't pollute the real ~/.codewhale/crashes/.
+    if let Ok(dir) = std::env::var("CODEWHALE_CRASH_DIR") {
+        let crash_dir = PathBuf::from(dir);
+        let _ = std::fs::create_dir_all(&crash_dir);
+        return write_panic_dump_to(&crash_dir, name, location, message);
+    }
     let home = dirs::home_dir().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::NotFound, "home directory not found")
     })?;
@@ -582,13 +589,18 @@ mod spawn_supervised_tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
     /// A spawned task that panics does not propagate the panic to the
-    /// parent task — `spawn_supervised` catches it. Verified in isolation
-    /// from the on-disk crash-dump path so the test is portable across
-    /// macOS / Linux / Windows (where `dirs::home_dir()` reads
-    /// `USERPROFILE`, not `HOME`, so env-mutation tricks don't redirect
-    /// the dump on Windows).
+    /// parent task — `spawn_supervised` catches it.
+    ///
+    /// Uses `CODEWHALE_CRASH_DIR` to redirect crash dumps to a temp
+    /// directory so tests don't pollute the real `~/.codewhale/crashes/`.
     #[tokio::test]
     async fn panicking_task_does_not_propagate_to_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // SAFETY: test-only env mutation; edition 2024 marks set_var unsafe.
+        unsafe {
+            std::env::set_var("CODEWHALE_CRASH_DIR", tmp.path());
+        }
+
         let parent_alive = Arc::new(AtomicBool::new(false));
         let parent_alive_clone = parent_alive.clone();
 
@@ -610,10 +622,29 @@ mod spawn_supervised_tests {
             parent_alive.load(Ordering::SeqCst),
             "fixture task must have run before panicking"
         );
+        // Verify crash dump landed in temp dir, not real crashes dir.
+        let entries: Vec<_> = std::fs::read_dir(tmp.path())
+            .expect("crashes dir")
+            .flatten()
+            .collect();
+        assert!(
+            entries.iter().any(|e| e
+                .file_name()
+                .to_string_lossy()
+                .contains("panic-test-fixture")),
+            "crash dump should be in temp dir; found: {:?}",
+            entries.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+        );
     }
 
     #[tokio::test]
     async fn panicking_blocking_task_does_not_propagate_to_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // SAFETY: test-only env mutation; edition 2024 marks set_var unsafe.
+        unsafe {
+            std::env::set_var("CODEWHALE_CRASH_DIR", tmp.path());
+        }
+
         let parent_alive = Arc::new(AtomicBool::new(false));
         let parent_alive_clone = parent_alive.clone();
 

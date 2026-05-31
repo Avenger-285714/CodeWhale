@@ -18,8 +18,8 @@ export interface RepoFacts {
 }
 
 export const FACTS: RepoFacts = {
-  "generatedAt": "2026-05-26T17:03:21.939Z",
-  "version": "0.8.46",
+  "generatedAt": "2026-05-31T01:03:36.828Z",
+  "version": "0.8.48",
   "crates": [
     "agent",
     "app-server",
@@ -86,7 +86,7 @@ export const FACTS: RepoFacts = {
     },
     {
       "id": "moonshot",
-      "label": "Moonshot/Kimi",
+      "label": "Moonshot/Kimi (deprecated)",
       "env": "MOONSHOT_API_KEY / KIMI_API_KEY"
     },
     {
@@ -103,11 +103,16 @@ export const FACTS: RepoFacts = {
       "id": "ollama",
       "label": "Ollama",
       "env": "OLLAMA_API_KEY"
+    },
+    {
+      "id": "xiaomi",
+      "label": "Xiaomi MiMo",
+      "env": "MIMO_API_KEY"
     }
   ],
   "defaultModel": "deepseek-v4-pro",
   "nodeEngines": ">=18",
-  "toolCount": 70,
+  "toolCount": 73,
   "license": "MIT",
   "latestRelease": null
 };

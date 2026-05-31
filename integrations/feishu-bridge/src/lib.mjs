@@ -35,6 +35,43 @@ export function cleanEnvValue(value) {
   return String(value ?? "").trim();
 }
 
+// Rename window: CODEWHALE_* env names are canonical; DEEPSEEK_* are legacy
+// aliases. The bridge internals still read DEEPSEEK_* keys, so we backfill them
+// from any CODEWHALE_* equivalent the user supplied. This is additive and
+// non-breaking — existing DEEPSEEK_*-only configs are untouched, and if both
+// are set the explicit DEEPSEEK_* value wins. The DeepSeek *provider* key keeps
+// its DEEPSEEK_API_KEY name (CODEWHALE_API_KEY is accepted as a convenience
+// alias only). See the runtime's own CODEWHALE_*/.codewhale rename.
+export const CODEWHALE_ENV_ALIASES = Object.freeze({
+  CODEWHALE_RUNTIME_URL: "DEEPSEEK_RUNTIME_URL",
+  CODEWHALE_RUNTIME_TOKEN: "DEEPSEEK_RUNTIME_TOKEN",
+  CODEWHALE_RUNTIME_PORT: "DEEPSEEK_RUNTIME_PORT",
+  CODEWHALE_WORKSPACE: "DEEPSEEK_WORKSPACE",
+  CODEWHALE_MODEL: "DEEPSEEK_MODEL",
+  CODEWHALE_MODE: "DEEPSEEK_MODE",
+  CODEWHALE_ALLOW_SHELL: "DEEPSEEK_ALLOW_SHELL",
+  CODEWHALE_TRUST_MODE: "DEEPSEEK_TRUST_MODE",
+  CODEWHALE_AUTO_APPROVE: "DEEPSEEK_AUTO_APPROVE",
+  CODEWHALE_CHAT_ALLOWLIST: "DEEPSEEK_CHAT_ALLOWLIST",
+  CODEWHALE_ALLOW_UNLISTED: "DEEPSEEK_ALLOW_UNLISTED",
+  CODEWHALE_TURN_TIMEOUT_MS: "DEEPSEEK_TURN_TIMEOUT_MS",
+  CODEWHALE_API_KEY: "DEEPSEEK_API_KEY",
+});
+
+/**
+ * Backfill legacy DEEPSEEK_* keys from their CODEWHALE_* aliases on the given
+ * env object, mutating and returning it. A legacy key that is already set
+ * (non-empty) is never overwritten.
+ */
+export function applyCodewhaleEnvAliases(env = {}) {
+  for (const [canonical, legacy] of Object.entries(CODEWHALE_ENV_ALIASES)) {
+    if (cleanEnvValue(env[canonical]) && !cleanEnvValue(env[legacy])) {
+      env[legacy] = env[canonical];
+    }
+  }
+  return env;
+}
+
 export function isPlaceholderValue(value) {
   const normalized = cleanEnvValue(value).toLowerCase();
   return (
@@ -202,8 +239,12 @@ export function activeTurnBlock(detail, state = {}) {
   };
 }
 
-export function validateBridgeConfig(env, options = {}) {
-  const runtimeEnv = options.runtimeEnv || null;
+export function validateBridgeConfig(rawEnv, options = {}) {
+  // Accept CODEWHALE_* aliases for the product/runtime vars (rename window).
+  const env = applyCodewhaleEnvAliases({ ...(rawEnv || {}) });
+  const runtimeEnv = options.runtimeEnv
+    ? applyCodewhaleEnvAliases({ ...options.runtimeEnv })
+    : null;
   const workspaceRoot = options.workspaceRoot || "";
   const errors = [];
   const warnings = [];

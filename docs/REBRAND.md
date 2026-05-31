@@ -23,9 +23,10 @@ codewhale doctor
 codewhale
 ```
 
-Your `~/.deepseek/config.toml`, `~/.deepseek/sessions/`, `~/.deepseek/skills/`,
-`~/.deepseek/tasks/`, and `~/.deepseek/mcp.json` are untouched. Existing
-`DEEPSEEK_*` environment variables continue to work.
+New installs use `~/.codewhale/` for local state. Existing
+`~/.deepseek/config.toml`, `~/.deepseek/sessions/`, `~/.deepseek/skills/`,
+`~/.deepseek/tasks/`, and `~/.deepseek/mcp.json` remain readable as legacy
+fallbacks. Existing `DEEPSEEK_*` environment variables continue to work.
 
 ## What got renamed
 
@@ -52,9 +53,9 @@ Anything that targets the DeepSeek provider API stays exactly as it was:
   aliases `deepseek-chat` and `deepseek-reasoner`.
 - **Hosts**: `api.deepseek.com` (global) and `api.deepseeki.com` (China
   fallback).
-- **Config directory**: `~/.deepseek/`. Renaming this would invalidate
-  every existing install's saved API key, sessions, skills, MCP config,
-  and audit log.
+- **Legacy config directory**: `~/.deepseek/` remains a compatibility fallback
+  so existing saved API keys, sessions, skills, MCP config, and audit logs are
+  not invalidated. The canonical directory for new state is `~/.codewhale/`.
 - **GitHub repository URL**: `https://github.com/Hmbown/CodeWhale`.
   The old `Hmbown/DeepSeek-TUI` URL redirects there during the transition.
 - **Homebrew tap and formula** (`Hmbown/homebrew-deepseek-tui`): still
@@ -123,8 +124,8 @@ CodeWhale is a shorter, terminal-friendlier handle for the same terminal
 coding agent and the longer-term product direction: a DeepSeek-first agentic
 terminal for open source and open-weight coding models. The project name,
 command names, package names, release assets, Docker image, and CNB mirror move
-to CodeWhale; the official DeepSeek provider, model IDs, env vars, and
-`~/.deepseek/` config surface remain first-class.
+to CodeWhale; the official DeepSeek provider, model IDs, env vars, and legacy
+`~/.deepseek/` compatibility surface remain first-class.
 
 ## Reporting issues with the rename
 

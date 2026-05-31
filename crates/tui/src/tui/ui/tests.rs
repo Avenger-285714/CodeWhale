@@ -73,6 +73,7 @@ struct SettingsHomeGuard {
     _tmp: TempDir,
     previous_home: Option<OsString>,
     previous_userprofile: Option<OsString>,
+    previous_config_path: Option<OsString>,
     _lock: MutexGuard<'static, ()>,
 }
 
@@ -82,15 +83,22 @@ impl SettingsHomeGuard {
         let tmp = TempDir::new().expect("settings tempdir");
         let previous_home = std::env::var_os("HOME");
         let previous_userprofile = std::env::var_os("USERPROFILE");
+        let previous_config_path = std::env::var_os("DEEPSEEK_CONFIG_PATH");
         // Safety: test-only environment mutation guarded by a global mutex.
         unsafe {
             std::env::set_var("HOME", tmp.path());
             std::env::set_var("USERPROFILE", tmp.path());
+            // Also pin DEEPSEEK_CONFIG_PATH into the temp dir so `Settings::load`
+            // reaches its on-disk path (its `cfg(test)` hermetic default only
+            // short-circuits when no override is set). Settings then round-trip
+            // through `<tmp>/settings.toml`, isolated from the real home.
+            std::env::set_var("DEEPSEEK_CONFIG_PATH", tmp.path().join("config.toml"));
         }
         Self {
             _tmp: tmp,
             previous_home,
             previous_userprofile,
+            previous_config_path,
             _lock: lock,
         }
     }
@@ -107,6 +115,10 @@ impl Drop for SettingsHomeGuard {
             match self.previous_userprofile.take() {
                 Some(previous) => std::env::set_var("USERPROFILE", previous),
                 None => std::env::remove_var("USERPROFILE"),
+            }
+            match self.previous_config_path.take() {
+                Some(previous) => std::env::set_var("DEEPSEEK_CONFIG_PATH", previous),
+                None => std::env::remove_var("DEEPSEEK_CONFIG_PATH"),
             }
         }
     }
@@ -1333,6 +1345,39 @@ fn session_approved_cache_keeps_tool_name_session_grants() {
     );
 }
 
+#[test]
+fn approval_request_uses_event_input_after_pending_tool_uses_drain() {
+    let mut app = create_test_app();
+    app.pending_tool_uses.push((
+        "tool_1".to_string(),
+        "exec_shell".to_string(),
+        serde_json::json!({ "cmd": "stale" }),
+    ));
+    app.pending_tool_uses.clear();
+
+    let input = serde_json::json!({
+        "cmd": "cargo test --workspace",
+        "cwd": "/tmp/codewhale",
+    });
+    let request = approval_request_from_event_input(
+        &app,
+        "tool_1",
+        "exec_shell",
+        "Run tests",
+        &input,
+        "approval-key",
+    );
+
+    assert_eq!(request.params, input);
+    let details = request.prominent_detail_items(crate::localization::Locale::En);
+    assert!(
+        details
+            .iter()
+            .any(|detail| detail.value.contains("cargo test --workspace")),
+        "approval details should come from the event input, not drained pending_tool_uses: {details:?}",
+    );
+}
+
 fn create_test_options() -> TuiOptions {
     TuiOptions {
         model: "deepseek-v4-pro".to_string(),
@@ -2420,6 +2465,27 @@ fn version_hint_requires_complete_release_assets() {
     assert!(
         version_hint_from_release_json(&missing_state, "0.8.46").is_none(),
         "do not accept malformed asset state as uploaded"
+    );
+}
+
+#[test]
+fn version_hint_waits_for_windows_batch_launcher_asset() {
+    let mut release = complete_release_json("v0.8.48");
+    release["assets"] = serde_json::Value::Array(
+        release["assets"]
+            .as_array()
+            .expect("assets")
+            .iter()
+            .filter(|asset| {
+                asset.get("name").and_then(serde_json::Value::as_str) != Some("codewhale.bat")
+            })
+            .cloned()
+            .collect(),
+    );
+
+    assert!(
+        version_hint_from_release_json(&release, "0.8.47").is_none(),
+        "do not advertise a release before the Windows batch launcher is uploaded"
     );
 }
 

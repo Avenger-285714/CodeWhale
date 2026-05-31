@@ -18,6 +18,54 @@ pub(crate) fn lock_test_env() -> MutexGuard<'static, ()> {
     }
 }
 
+/// RAII guard that isolates `Settings::load()` from the developer's real
+/// `~/.deepseek` / `~/.codewhale` config for the duration of a test.
+///
+/// Holds the process-wide env mutex, points `DEEPSEEK_CONFIG_PATH` at a fresh
+/// empty temp config (with a sibling empty `settings.toml`), and restores the
+/// previous value — dropping the tempdir — on drop. Without it, any test that
+/// builds an `App` or calls `apply_document`/`change` reads the developer's
+/// live `provider = "…"` setting, so model normalization (provider-prefixing)
+/// and api-key detection diverge from the Deepseek-default CI environment and
+/// the test fails on the maintainer's machine but passes on clean CI.
+pub(crate) struct IsolatedConfigEnv {
+    _guard: MutexGuard<'static, ()>,
+    _tempdir: tempfile::TempDir,
+    prev: Option<std::ffi::OsString>,
+}
+
+impl Drop for IsolatedConfigEnv {
+    fn drop(&mut self) {
+        // SAFETY: env mutation is serialised by the env mutex held in `_guard`.
+        unsafe {
+            match self.prev.take() {
+                Some(value) => std::env::set_var("DEEPSEEK_CONFIG_PATH", value),
+                None => std::env::remove_var("DEEPSEEK_CONFIG_PATH"),
+            }
+        }
+    }
+}
+
+/// Acquire the env lock and isolate config loading. Keep the returned guard
+/// alive for the whole test (`let _env = isolated_config_env();`).
+pub(crate) fn isolated_config_env() -> IsolatedConfigEnv {
+    let guard = lock_test_env();
+    let tempdir = tempfile::tempdir().expect("isolated config tempdir");
+    let config_path = tempdir.path().join("config.toml");
+    std::fs::write(&config_path, "").expect("seed isolated config");
+    std::fs::write(tempdir.path().join("settings.toml"), "").expect("seed isolated settings");
+    let prev = std::env::var_os("DEEPSEEK_CONFIG_PATH");
+    // SAFETY: env mutation is serialised by the env mutex held in `guard`.
+    unsafe {
+        std::env::set_var("DEEPSEEK_CONFIG_PATH", &config_path);
+    }
+    IsolatedConfigEnv {
+        _guard: guard,
+        _tempdir: tempdir,
+        prev,
+    }
+}
+
 /// Find the byte position of the first divergence between two strings,
 /// returning a windowed view (`±32 bytes` around the divergence) so failures
 /// in cache-prefix-stability tests show *which* bytes drifted, not just that

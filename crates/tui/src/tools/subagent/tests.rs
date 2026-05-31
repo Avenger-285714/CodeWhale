@@ -2030,6 +2030,38 @@ fn emit_parent_completion_dropped_receiver_does_not_panic() {
     );
 }
 
+#[test]
+fn completion_guard_drop_emits_synthetic_failure_for_direct_child() {
+    let (tx, mut rx) = mpsc::unbounded_channel::<SubAgentCompletion>();
+    let runtime = runtime_with_depth(1, Some(tx));
+
+    drop(CompletionGuard::new(runtime, "agent_panic".to_string()));
+
+    let completion = rx
+        .try_recv()
+        .expect("guard drop should wake the parent with a synthetic completion");
+    assert_eq!(completion.agent_id, "agent_panic");
+    assert!(completion.payload.contains("exited unexpectedly"));
+    assert!(completion.payload.contains("<codewhale:subagent.done>"));
+    assert!(completion.payload.contains("\"status\":\"failed\""));
+    assert!(rx.try_recv().is_err(), "guard should emit exactly once");
+}
+
+#[test]
+fn completion_guard_disarm_suppresses_synthetic_failure() {
+    let (tx, mut rx) = mpsc::unbounded_channel::<SubAgentCompletion>();
+    let runtime = runtime_with_depth(1, Some(tx));
+    let mut guard = CompletionGuard::new(runtime, "agent_ok".to_string());
+
+    guard.disarm();
+    drop(guard);
+
+    assert!(
+        rx.try_recv().is_err(),
+        "normal completion path disarms the synthetic panic guard"
+    );
+}
+
 #[tokio::test]
 async fn run_subagent_task_emits_parent_completion_before_terminal_update() {
     let manager = Arc::new(RwLock::new(SubAgentManager::new(PathBuf::from("."), 2)));

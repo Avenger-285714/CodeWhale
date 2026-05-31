@@ -1697,6 +1697,31 @@ impl Engine {
     /// context, the parent's reset doesn't invalidate them. Their handles
     /// are captured in the structured-state block so the next cycle can see
     /// they're still running.
+    /// Bound a cycle-boundary briefing turn so a hung request can't stall the
+    /// whole turn. `maybe_advance_cycle` runs *before* `TurnComplete` is
+    /// emitted (engine.rs, #234), and the briefing is a NON-streaming request
+    /// (`stream: false`) made on the bloated, end-of-cycle context. The HTTP
+    /// client deliberately has no overall request timeout (streaming turns run
+    /// for minutes), so without this bound a server that accepts the connection
+    /// and then stops responding would block `maybe_advance_cycle` forever —
+    /// `TurnComplete` never fires, the spinner runs until the 5-minute stall
+    /// watchdog trips, and the user sees "Turn stalled — no completion signal".
+    /// On timeout we surface an `Err`, which every caller already handles by
+    /// logging and skipping the cycle advance (continuing in the current cycle).
+    async fn with_briefing_timeout<F>(fut: F) -> Result<String>
+    where
+        F: std::future::Future<Output = Result<String>>,
+    {
+        const CYCLE_BRIEFING_TIMEOUT: Duration = Duration::from_secs(120);
+        match tokio::time::timeout(CYCLE_BRIEFING_TIMEOUT, fut).await {
+            Ok(inner) => inner,
+            Err(_elapsed) => Err(anyhow::anyhow!(
+                "cycle briefing timed out after {}s",
+                CYCLE_BRIEFING_TIMEOUT.as_secs()
+            )),
+        }
+    }
+
     async fn maybe_advance_cycle(&mut self, mode: AppMode) {
         if !should_advance_cycle(
             self.estimated_input_tokens() as u64,
@@ -1745,21 +1770,22 @@ impl Engine {
                 .await;
                 s.to_system_block()
             };
-            match seam_mgr
-                .produce_flash_briefing(&seams, state_text.as_deref())
-                .await
+            match Self::with_briefing_timeout(
+                seam_mgr.produce_flash_briefing(&seams, state_text.as_deref()),
+            )
+            .await
             {
                 Ok(text) => text,
                 Err(err) => {
                     crate::logging::warn(format!(
                         "Flash briefing failed, falling back to main model: {err}"
                     ));
-                    match produce_briefing(
+                    match Self::with_briefing_timeout(produce_briefing(
                         &client,
                         &self.session.model,
                         &self.session.messages,
                         max_briefing_tokens,
-                    )
+                    ))
                     .await
                     {
                         Ok(text) => text,
@@ -1779,12 +1805,12 @@ impl Engine {
                 }
             }
         } else {
-            match produce_briefing(
+            match Self::with_briefing_timeout(produce_briefing(
                 &client,
                 &self.session.model,
                 &self.session.messages,
                 max_briefing_tokens,
-            )
+            ))
             .await
             {
                 Ok(text) => text,
@@ -2138,7 +2164,7 @@ use self::tool_catalog::{
 };
 #[cfg(test)]
 use self::tool_catalog::{
-    TOOL_SEARCH_BM25_NAME, maybe_activate_requested_deferred_tool,
+    TOOL_SEARCH_BM25_NAME, TOOL_SEARCH_REGEX_NAME, maybe_activate_requested_deferred_tool,
     preflight_requested_deferred_tool, should_default_defer_tool,
 };
 use self::tool_execution::emit_tool_audit;

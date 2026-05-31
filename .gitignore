@@ -93,6 +93,8 @@ apps/
 .claude/CODEMAP_*
 .claude/handoff_*
 .claude/codemap_*
+HANDOFF-*.md
+handoff-*.md
 
 # Maintainer-internal design notes (trade-secret material, never published)
 .private/

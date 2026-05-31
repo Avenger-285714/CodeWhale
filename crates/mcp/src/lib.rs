@@ -7,6 +7,8 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+const LOCAL_MCP_SERVICE_NAME: &str = "codewhale-mcp";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     pub name: String,
@@ -495,7 +497,7 @@ pub fn run_stdio_server(
     }
 
     state.lifecycle_state = "stopped".to_string();
-    let _ = writeln!(stderr, "deepseek-mcp stdio server exited");
+    let _ = writeln!(stderr, "{LOCAL_MCP_SERVICE_NAME} stdio server exited");
     let mut definitions: Vec<McpServerDefinition> = state.definitions.into_values().collect();
     definitions.sort_by(|a, b| a.config.name.cmp(&b.config.name));
     Ok(definitions)
@@ -652,7 +654,7 @@ fn dispatch_stdio_request(
     match method {
         "initialize" | "capabilities" => Ok((
             json!({
-                "server": "deepseek-mcp",
+                "server": LOCAL_MCP_SERVICE_NAME,
                 "transport": "stdio",
                 "methods": default_rpc_methods(),
                 "lifecycle": lifecycle_snapshot(state)
@@ -662,7 +664,7 @@ fn dispatch_stdio_request(
         "healthz" => Ok((
             json!({
                 "status": "ok",
-                "service": "deepseek-mcp",
+                "service": LOCAL_MCP_SERVICE_NAME,
                 "transport": "stdio",
                 "lifecycle": lifecycle_snapshot(state)
             }),

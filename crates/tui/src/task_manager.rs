@@ -1639,7 +1639,7 @@ fn default_auto_approve() -> bool {
     true
 }
 
-/// Default task persistence location (`~/.deepseek/tasks`).
+/// Default task persistence location (`~/.codewhale/tasks`).
 #[must_use]
 pub fn default_tasks_dir() -> PathBuf {
     if let Ok(path) = std::env::var("DEEPSEEK_TASKS_DIR")

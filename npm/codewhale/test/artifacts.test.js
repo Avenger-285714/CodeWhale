@@ -64,3 +64,24 @@ test("known platforms are unaffected by alias map", () => {
     });
   }
 });
+
+test("all asset names includes every Windows release asset", () => {
+  const { allAssetNames } = require(ARTIFACTS_PATH);
+  const names = allAssetNames();
+  assert.ok(names.includes("codewhale-windows-x64.exe"));
+  assert.ok(names.includes("codewhale-tui-windows-x64.exe"));
+  assert.ok(names.includes("codewhale.bat"));
+  assert.equal(new Set(names).size, names.length);
+});
+
+test("Windows launcher sets low-motion environment before launching", () => {
+  const { windowsLauncherContent } = require(ARTIFACTS_PATH);
+  const launcher = windowsLauncherContent();
+  const setIndex = launcher.indexOf('set "NO_ANIMATIONS=1"');
+  const wtIndex = launcher.indexOf("wt --title CodeWhale");
+  const directIndex = launcher.indexOf('"%~dp0codewhale-windows-x64.exe" %*');
+  assert.ok(setIndex >= 0);
+  assert.ok(wtIndex > setIndex);
+  assert.ok(directIndex > setIndex);
+  assert.match(launcher, /\r\n/);
+});

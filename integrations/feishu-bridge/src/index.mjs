@@ -4,6 +4,7 @@ import * as Lark from "@larksuiteoapi/node-sdk";
 
 import {
   activeTurnBlock,
+  applyCodewhaleEnvAliases,
   commandAction,
   compactRuntimeError,
   helpText,
@@ -19,6 +20,10 @@ import {
   splitMessage,
   stripGroupPrefix
 } from "./lib.mjs";
+
+// Rename window: accept CODEWHALE_* env names by backfilling their legacy
+// DEEPSEEK_* equivalents before the config below reads process.env.
+applyCodewhaleEnvAliases(process.env);
 
 class ThreadStore {
   static async open(filePath) {

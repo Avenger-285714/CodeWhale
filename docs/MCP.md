@@ -65,7 +65,8 @@ restart-required until the TUI is restarted.
 
 Default path:
 
-- `~/.deepseek/mcp.json`
+- `~/.codewhale/mcp.json`
+- Legacy fallback: `~/.deepseek/mcp.json`
 
 Overrides:
 
@@ -123,9 +124,9 @@ The CLI also exposes helper tools when MCP is enabled:
 
 You can also use `mcpServers` instead of `servers` for compatibility with other clients.
 
-## Running DeepSeek as an MCP Server
+## Running CodeWhale as an MCP Server
 
-You can register your local DeepSeek binary as an MCP server so other DeepSeek sessions (or any MCP client) can call its tools.
+You can register your local CodeWhale binary as an MCP server so other CodeWhale sessions (or any MCP client) can call its tools.
 
 ### Quick Setup
 
@@ -142,7 +143,7 @@ Options:
 
 ### Manual Config
 
-Equivalent manual entry in `~/.deepseek/mcp.json`:
+Equivalent manual entry in `~/.codewhale/mcp.json`:
 
 ```json
 {
@@ -170,11 +171,11 @@ correct binary.
 
 ### Tool Naming
 
-Tools from a self-hosted DeepSeek server follow the standard naming convention:
+Tools from a self-hosted CodeWhale server follow the standard naming convention:
 
-- `mcp_deepseek_<tool>` (if the server is named `codewhale`)
+- `mcp_codewhale_<tool>` (if the server is named `codewhale`)
 
-For example, the `shell` tool becomes `mcp_deepseek_shell`.
+For example, the `shell` tool becomes `mcp_codewhale_shell`.
 
 ### MCP Server vs HTTP/SSE API vs ACP
 
@@ -182,12 +183,12 @@ For example, the `shell` tool becomes `mcp_deepseek_shell`.
 |---|---|---|---|
 | **Protocol** | MCP stdio | HTTP/SSE JSON-RPC | ACP stdio |
 | **Use case** | Tool server for MCP clients | Runtime API for apps | Editor agent for Zed/custom ACP clients |
-| **Config** | `~/.deepseek/mcp.json` entry | Direct URL connection | Editor `agent_servers` custom command |
+| **Config** | `~/.codewhale/mcp.json` entry | Direct URL connection | Editor `agent_servers` custom command |
 | **Lifecycle** | Spawned per client session | Long-running daemon | Spawned per editor agent session |
 
-Use `mcp add-self` when you want DeepSeek tools available to other MCP clients.
+Use `mcp add-self` when you want CodeWhale tools available to other MCP clients.
 Use `serve --http` when building applications that consume the API directly.
-Use `serve --acp` when an editor wants to talk to DeepSeek as an ACP agent.
+Use `serve --acp` when an editor wants to talk to CodeWhale as an ACP agent.
 
 ### Verification
 

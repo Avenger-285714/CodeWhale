@@ -112,8 +112,8 @@ the model input budget.
 Path:
 
 - `DEEPSEEK_CAPACITY_MEMORY_DIR` (if set)
-- otherwise `~/.deepseek/memory/<session_id>.jsonl`
-- fallback: `<workspace>/.deepseek/memory/<session_id>.jsonl` when home path is unavailable/unwritable
+- otherwise `~/.codewhale/memory/<session_id>.jsonl`
+- fallback: `<workspace>/.codewhale/memory/<session_id>.jsonl` when home path is unavailable/unwritable
 
 Record fields:
 

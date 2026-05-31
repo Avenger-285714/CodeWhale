@@ -111,8 +111,8 @@ fn configure_windows_console_utf8() {}
     bin_name = "codewhale-tui",
     author,
     version = env!("DEEPSEEK_BUILD_VERSION"),
-    about = "codewhale/CLI for DeepSeek models",
-    long_about = "Terminal-native TUI and CLI for DeepSeek models.\n\nRun 'codewhale' to start.\n\nNot affiliated with DeepSeek Inc."
+    about = "CodeWhale terminal runtime",
+    long_about = "Terminal-native coding agent for open-source and open-weight models.\n\nRun 'codewhale' to start.\n\nNot affiliated with DeepSeek Inc."
 )]
 struct Cli {
     /// Subcommand to run
@@ -654,13 +654,13 @@ enum McpCommand {
     },
     /// Validate MCP config and required servers
     Validate,
-    /// Register this DeepSeek binary as a local MCP stdio server.
+    /// Register this CodeWhale binary as a local MCP stdio server.
     ///
     /// This adds a config entry that runs `codewhale serve --mcp` (stdio protocol).
     /// For the HTTP/SSE runtime API, use `codewhale serve --http` directly instead.
     #[command(
         name = "add-self",
-        long_about = "Register this DeepSeek binary as a local MCP stdio server.\n\nAdds a config entry to ~/.deepseek/mcp.json that launches `codewhale serve --mcp`\nvia the stdio transport. Other DeepSeek sessions (or any MCP client) can then\ndiscover and call tools exposed by this server.\n\nUse `codewhale serve --http` instead if you need the HTTP/SSE runtime API."
+        long_about = "Register this CodeWhale binary as a local MCP stdio server.\n\nAdds a config entry to ~/.codewhale/mcp.json that launches `codewhale serve --mcp`\nvia the stdio transport. Other CodeWhale sessions (or any MCP client) can then\ndiscover and call tools exposed by this server.\n\nUse `codewhale serve --http` instead if you need the HTTP/SSE runtime API."
     )]
     AddSelf {
         /// Server name in mcp.json (default: "codewhale")
@@ -936,7 +936,9 @@ async fn main() -> Result<()> {
                     bail!("Choose exactly one server mode: --mcp, --http, or --acp");
                 }
                 if args.mcp {
-                    mcp_server::run_mcp_server(workspace)
+                    tokio::task::spawn_blocking(move || mcp_server::run_mcp_server(workspace))
+                        .await
+                        .context("MCP server task failed")?
                 } else if args.http {
                     let config = load_config_from_cli(&cli)?;
                     let cors_origins = resolve_cors_origins(&config, &args.cors_origin);
@@ -1657,7 +1659,7 @@ fn run_setup(config: &Config, workspace: &Path, args: SetupArgs) -> Result<()> {
 
     println!(
         "{}",
-        "DeepSeek Setup".truecolor(aqua_r, aqua_g, aqua_b).bold()
+        "CodeWhale Setup".truecolor(aqua_r, aqua_g, aqua_b).bold()
     );
     println!("{}", "==============".truecolor(sky_r, sky_g, sky_b));
     println!("Workspace: {}", crate::utils::display_path(workspace));
@@ -1920,7 +1922,7 @@ fn run_setup_status(config: &Config, workspace: &Path) -> Result<()> {
             );
         }
     }
-    println!("  · base_url: {}", config.deepseek_base_url());
+    println!("  · base_url: {}", config.active_provider_base_url());
     let model = config
         .default_text_model
         .clone()
@@ -2240,7 +2242,7 @@ async fn run_doctor(config: &Config, workspace: &Path, config_path_override: Opt
     println!("  · credential precedence: ~/.deepseek/config.toml, OS keyring, then env");
 
     let api_key_source = resolve_api_key_source(config);
-    let has_api_key = if config.deepseek_api_key().is_ok() {
+    let has_api_key = if config.active_provider_api_key().is_ok() {
         let source_label = match api_key_source {
             ApiKeySource::Config => "config.toml",
             ApiKeySource::Keyring => "OS keyring",
@@ -3228,7 +3230,7 @@ fn doctor_api_target(config: &Config) -> DoctorApiTarget {
     let provider = config.api_provider();
     DoctorApiTarget {
         provider: provider.as_str(),
-        base_url: config.deepseek_base_url(),
+        base_url: config.active_provider_base_url(),
         model: config.default_model(),
     }
 }
@@ -3245,7 +3247,7 @@ fn doctor_strict_tool_mode_status(config: &Config) -> DoctorStrictToolModeStatus
     }
 
     let target = doctor_api_target(config);
-    match known_deepseek_base_url_kind(&target.base_url) {
+    match known_active_provider_base_url_kind(&target.base_url) {
         Some(DeepSeekBaseUrlKind::Beta) => DoctorStrictToolModeStatus {
             enabled: true,
             status: "ready",
@@ -3281,7 +3283,7 @@ enum DeepSeekBaseUrlKind {
     NonBeta,
 }
 
-fn known_deepseek_base_url_kind(base_url: &str) -> Option<DeepSeekBaseUrlKind> {
+fn known_active_provider_base_url_kind(base_url: &str) -> Option<DeepSeekBaseUrlKind> {
     match base_url.trim_end_matches('/').to_ascii_lowercase().as_str() {
         "https://api.deepseek.com/beta" | "https://api.deepseeki.com/beta" => {
             Some(DeepSeekBaseUrlKind::Beta)
@@ -4256,7 +4258,7 @@ async fn run_mcp_command(config: &Config, command: McpCommand) -> Result<()> {
             );
             save_mcp_config(&config_path, &cfg)?;
             println!(
-                "Registered DeepSeek as MCP server '{name}' in {}",
+                "Registered CodeWhale as MCP server '{name}' in {}",
                 config_path.display()
             );
             println!("  command: {exe_str}");

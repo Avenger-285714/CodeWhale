@@ -313,7 +313,7 @@ codewhale --provider atlascloud
 
 # Wanjie Ark
 codewhale auth set --provider wanjie-ark --api-key "YOUR_WANJIE_API_KEY"
-codewhale --provider wanjie-ark --model deepseek-reasoner
+codewhale --provider wanjie-ark --model deepseek-v4-pro
 
 # OpenRouter
 codewhale auth set --provider openrouter --api-key "YOUR_OPENROUTER_API_KEY"
@@ -339,9 +339,11 @@ VLLM_BASE_URL="http://localhost:8000/v1" codewhale --provider vllm --model deeps
 # Trusted LAN vLLM over HTTP
 DEEPSEEK_ALLOW_INSECURE_HTTP=1 VLLM_BASE_URL="http://192.168.0.110:8000/v1" codewhale --provider vllm --model deepseek-v4-flash
 
-# Xiaomi MiMo
+# Xiaomi MiMo (Token Plan — cn / sgp / ams clusters)
 codewhale auth set --provider xiaomi --api-key "YOUR_MIMO_API_KEY"
-codewhale --provider xiaomi --model deepseek-v4-pro
+codewhale --provider xiaomi --model mimo-v2.5-pro
+# MIMO_CLUSTER=sgp codewhale --provider xiaomi     # Singapore cluster
+# MIMO_BASE_URL="https://token-plan-ams.xiaomimimo.com/v1" codewhale --provider xiaomi  # Amsterdam cluster
 
 # Self-hosted Ollama
 ollama pull codewhale-coder:1.3b
@@ -360,6 +362,19 @@ active provider supports model listing.
 Release-specific changes live in [CHANGELOG.md](CHANGELOG.md). This README
 stays focused on current install paths, core workflows, provider setup, runtime
 interfaces, and extension points.
+
+### v0.8.48 stabilization highlights
+
+- Sub-agent fanout now has panic-safe completion guards and a parent wait
+  heartbeat, preventing child-task failures from freezing the turn loop.
+- Long cycle-briefing calls are bounded by a 120s timeout, so context
+  maintenance can fall back instead of blocking the session indefinitely.
+- CJK/IME composer input is handled as direct text while still preserving paste
+  burst Enter suppression for rapid multi-character input.
+- `/statusline` picker navigation now wraps, keeps the cursor visible, and
+  highlights the selected row across the full terminal width.
+- Release artifacts now include a Windows `codewhale.bat` launcher alongside
+  the executable pair for shell-friendly startup.
 
 ---
 
@@ -493,7 +508,7 @@ Key environment variables:
 | `DEEPSEEK_PROFILE` | Config profile name |
 | `DEEPSEEK_MEMORY` | Set to `on` to enable user memory |
 | `DEEPSEEK_ALLOW_INSECURE_HTTP=1` | Allow non-local `http://` API base URLs on trusted networks |
-| `NVIDIA_API_KEY` / `OPENAI_API_KEY` / `ATLASCLOUD_API_KEY` / `WANJIE_ARK_API_KEY` / `OPENROUTER_API_KEY` / `NOVITA_API_KEY` / `FIREWORKS_API_KEY` / `MOONSHOT_API_KEY` / `KIMI_API_KEY` / `SGLANG_API_KEY` / `VLLM_API_KEY` / `OLLAMA_API_KEY` | Provider auth |
+| `NVIDIA_API_KEY` / `OPENAI_API_KEY` / `ATLASCLOUD_API_KEY` / `WANJIE_ARK_API_KEY` / `OPENROUTER_API_KEY` / `NOVITA_API_KEY` / `FIREWORKS_API_KEY` / `MIMO_API_KEY` / `MOONSHOT_API_KEY` / `KIMI_API_KEY` / `SGLANG_API_KEY` / `VLLM_API_KEY` / `OLLAMA_API_KEY` | Provider auth |
 | `OPENAI_BASE_URL` / `OPENAI_MODEL` | Generic OpenAI-compatible endpoint and model ID |
 | `ATLASCLOUD_BASE_URL` / `ATLASCLOUD_MODEL` | AtlasCloud endpoint and model override |
 | `WANJIE_ARK_BASE_URL` / `WANJIE_ARK_MODEL` | Wanjie Ark endpoint and model override |
@@ -504,6 +519,8 @@ Key environment variables:
 | `SGLANG_MODEL` | Self-hosted SGLang model ID |
 | `VLLM_BASE_URL` | Self-hosted vLLM endpoint |
 | `VLLM_MODEL` | Self-hosted vLLM model ID |
+| `MIMO_BASE_URL` | Xiaomi MiMo endpoint override |
+| `MIMO_CLUSTER` | Xiaomi MiMo regional cluster: `cn` (default), `sgp`, or `ams` |
 | `OLLAMA_BASE_URL` | Self-hosted Ollama endpoint |
 | `OLLAMA_MODEL` | Self-hosted Ollama model tag |
 | `NO_ANIMATIONS=1` | Force accessibility mode at startup |
@@ -525,7 +542,7 @@ DeepSeek Platform defaults to `https://api.deepseek.com/beta` so beta-gated API 
 Legacy aliases `deepseek-chat` / `deepseek-reasoner` map to `deepseek-v4-flash` and retire after July 24, 2026. NVIDIA NIM variants use your NVIDIA account terms.
 
 > [!Note]
-> DeepSeek's pricing page now lists the V4 Pro rates above as the permanent prices: the previous 75% promotional discount has been folded into a one-quarter base-rate adjustment as the promotion window closes on 15:59 UTC on 31 May 2026. The TUI cost estimator already uses these values, so no behavioural change is required. For any future price changes, consult the official [DeepSeek pricing page](https://api-docs.deepseek.com/zh-cn/quick_start/pricing).
+> V4 Pro rates above are now permanent. DeepSeek folded the 75% promotional discount into a permanent one-quarter base-rate adjustment as of 31 May 2026. The TUI cost estimator already uses these values. For any future price changes, consult the official [DeepSeek pricing page](https://api-docs.deepseek.com/zh-cn/quick_start/pricing).
 
 ---
 
@@ -595,6 +612,14 @@ Full Changelog: [CHANGELOG.md](CHANGELOG.md).
 
 This project ships with help from a growing community of contributors:
 
+For v0.8.48, special thanks to contributors whose work landed in the
+stabilization harvest: **[reidliu41](https://github.com/reidliu41)**,
+**[donglovejava](https://github.com/donglovejava)**,
+**[zlh124](https://github.com/zlh124)**, **[cyq1017](https://github.com/cyq1017)**,
+**[cy2311](https://github.com/cy2311)**, **[nightt5879](https://github.com/nightt5879)**,
+**[yyyCode](https://github.com/yyyCode)**, **[buko](https://github.com/buko)**,
+and **[T-Phuong-Nguyen](https://github.com/T-Phuong-Nguyen)**.
+
 - **[merchloubna70-dot](https://github.com/merchloubna70-dot)** — 28 PRs spanning features, fixes, and VS Code extension scaffolding (#645–#681)
 - **[WyxBUPT-22](https://github.com/WyxBUPT-22)** — Markdown rendering for tables, bold/italic, and horizontal rules (#579)
 - **[loongmiaow-pixel](https://github.com/loongmiaow-pixel)** — Windows + China install documentation (#578)
@@ -612,7 +637,7 @@ This project ships with help from a growing community of contributors:
 - **[zichen0116](https://github.com/zichen0116)** — CODE_OF_CONDUCT.md (#686)
 - **[dfwqdyl-ui](https://github.com/dfwqdyl-ui)** — model ID case-sensitivity compatibility report (#729)
 - **[Oliver-ZPLiu](https://github.com/Oliver-ZPLiu)** — stale `working...` state bug report, Windows clipboard fallback, MCP Streamable HTTP session fixes, and Homebrew tap automation (#738, #850, #1643, #1631)
-- **[reidliu41](https://github.com/reidliu41)** — resume hint, workspace trust persistence, Ollama provider support, thinking-block stream finalization, CI cache hardening, streaming wrap, DeepSeek model completions, approval flow simplification, model picker Esc fix, user message highlighting, provider picker scroll, and `/new` session command (#863, #870, #921, #1078, #1603, #1628, #1601, #2143, #2056, #1995, #2241, #2235)
+- **[reidliu41](https://github.com/reidliu41)** — resume hint, workspace trust persistence, Ollama provider support, thinking-block stream finalization, CI cache hardening, streaming wrap, DeepSeek model completions, approval flow simplification, model picker Esc fix, user message highlighting, provider picker scroll, `/new` session command, statusline picker navigation, MCP shutdown guards, and provider help text (#863, #870, #921, #1078, #1603, #1628, #1601, #2143, #2056, #1995, #2241, #2235, #2324, #2357, #2366)
 - **[xieshutao](https://github.com/xieshutao)** — plain Markdown skill fallback (#869)
 - **[GK012](https://github.com/GK012)** — npm wrapper `--version` fallback (#885)
 - **[y0sif](https://github.com/y0sif)** — parent turn-loop wakeup after direct child sub-agent completion (#901)
@@ -647,8 +672,8 @@ This project ships with help from a growing community of contributors:
 - **[zlh124](https://github.com/zlh124)** — WSL2/headless startup report and clipboard-init fix (#1772, #1773)
 - **[aboimpinto](https://github.com/aboimpinto)** — Windows alt-screen logging, Home/End composer, runtime log follow-ups, taskbar progress, animated title spinner, and configurable completion sound (#1774, #1776, #1748, #1749, #1782, #1783, #1871, #1910)
 - **[LeoLin990405](https://github.com/LeoLin990405)** — provider model passthrough, reasoning replay, thinking-only turn, and Windows quoting fixes (#1740, #1743, #1742, #1744)
-- **[nightt5879](https://github.com/nightt5879)** — Ctrl+C prompt restore fix (#1764)
-- **[donglovejava](https://github.com/donglovejava)** — paste @file consolidation, CJK panic fix, user feedback, RLM routing, edit_file retry (#2154–#2168)
+- **[nightt5879](https://github.com/nightt5879)** — Ctrl+C prompt restore fix and deferred tool-search result limit fix (#1764, #2344)
+- **[donglovejava](https://github.com/donglovejava)** — paste @file consolidation, CJK panic fix, user feedback, RLM routing, edit_file retry, animated compaction liveness, and CJK/IME composer input (#2154–#2168, #2302, #2330)
 - **[encyc](https://github.com/encyc)** — session token breakdown in footer and `/status` (#2152)
 - **[saieswar237](https://github.com/saieswar237)** — review pipeline docs (#2178)
 - **[sximelon](https://github.com/sximelon)** — paste Enter suppression, key handler extraction (#2174, #2042)
@@ -664,13 +689,18 @@ This project ships with help from a growing community of contributors:
 - **[victorcheng2333](https://github.com/victorcheng2333)** — DEEPSEEK_YOLO env merge fix (#1870)
 - **[IIzzaya](https://github.com/IIzzaya)** — [✓] completion markers (#1935)
 - **[PurplePulse](https://github.com/PurplePulse)** — macOS onboarding layout pinning (#1837)
-- **[cyq1017](https://github.com/cyq1017)** — configurable base URL in /config view (#1967)
+- **[cyq1017](https://github.com/cyq1017)** — configurable base URL in /config view and Yuezhi provider contribution (#1967, #2375)
 - **[knqiufan](https://github.com/knqiufan)** — copy transcript without visual-wrap newlines (#1906)
 - **[Colorful-glassblock](https://github.com/Colorful-glassblock)** — DeepSeek V4 Pro pricing permanent (#1937)
 - **[hongqitai](https://github.com/hongqitai)** — clippy warnings fix (#2237)
 - **[EmiyaKiritsugu3](https://github.com/EmiyaKiritsugu3)** — DEEPSEEK.md project context (#1852)
 - **[HUQIANTAO](https://github.com/HUQIANTAO)** — Xiaomi MiMo provider support (#2240)
 - **[mvanhorn](https://github.com/mvanhorn)** — global AGENTS.md vendor-neutral fallback (#2156)
+- **[zlh124](https://github.com/zlh124)** — Windows batch launcher packaging and WSL/headless startup follow-through (#1772, #1773, #1861)
+- **[cy2311](https://github.com/cy2311)** — restart-safe holding-turn validation for v0.8.48 release hardening (#2325)
+- **[yyyCode](https://github.com/yyyCode)** — documentation report for the `~/.codewhale` state-root migration (#2322)
+- **[buko](https://github.com/buko)** — Cygwin/HOME config-path fragmentation report and patch notes (#2369)
+- **[T-Phuong-Nguyen](https://github.com/T-Phuong-Nguyen)** — MCP tool-search result-limit report (#2339)
 
 ---
 

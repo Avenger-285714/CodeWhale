@@ -7,9 +7,11 @@ mode, so the first version does not need a public webhook URL.
 Security model:
 
 - `codewhale serve --http` stays bound to `127.0.0.1`.
-- `/v1/*` runtime calls use `DEEPSEEK_RUNTIME_TOKEN`.
-- Feishu/Lark chats must be allowlisted unless `DEEPSEEK_ALLOW_UNLISTED=true`
-  is set for first pairing.
+- `/v1/*` runtime calls use `CODEWHALE_RUNTIME_TOKEN`; the legacy
+  `DEEPSEEK_RUNTIME_TOKEN` alias is still accepted.
+- Feishu/Lark chats must be allowlisted unless `CODEWHALE_ALLOW_UNLISTED=true`
+  is set for first pairing; `DEEPSEEK_ALLOW_UNLISTED=true` remains a legacy
+  alias.
 - Direct messages are the intended MVP control surface. Group chat control is
   disabled unless `FEISHU_ALLOW_GROUPS=true`.
 - Tool approvals are text commands: `/allow <approval_id>` or `/deny <approval_id>`.
@@ -19,8 +21,9 @@ Security model:
 ```bash
 cd /opt/codewhale/bridge
 npm install --omit=dev
-cp .env.example /etc/deepseek/feishu-bridge.env
-sudoedit /etc/deepseek/feishu-bridge.env
+sudo mkdir -p /etc/codewhale
+cp .env.example /etc/codewhale/feishu-bridge.env
+sudoedit /etc/codewhale/feishu-bridge.env
 node src/index.mjs
 ```
 
@@ -28,11 +31,14 @@ Validate the env files before starting the service:
 
 ```bash
 npm run validate:config -- \
-  --env /etc/deepseek/feishu-bridge.env \
-  --runtime-env /etc/deepseek/runtime.env \
+  --env /etc/codewhale/feishu-bridge.env \
+  --runtime-env /etc/codewhale/runtime.env \
   --workspace-root /opt/whalebro \
   --check-filesystem
 ```
+
+Existing deployments using `/etc/deepseek/*.env` can keep those paths during
+the rename window.
 
 For a Tencent Lighthouse deployment, use:
 

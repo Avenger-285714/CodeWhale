@@ -3504,8 +3504,66 @@ struct SubAgentTask {
     input_rx: mpsc::UnboundedReceiver<SubAgentInput>,
 }
 
+/// Guard that guarantees `emit_parent_completion` fires on every exit
+/// path — including panics caught by `spawn_supervised`.  Without this,
+/// a child that panics inside `run_subagent` never sends a completion
+/// signal, and the parent's `tokio::select!` in `turn_loop.rs` blocks
+/// forever (the deadlock from issue #1).
+///
+/// The guard is disarmed when the normal completion path runs; if the
+/// task panics or is aborted, `drop` sends a synthetic "failed" payload.
+struct CompletionGuard {
+    runtime: SubAgentRuntime,
+    agent_id: String,
+    armed: bool,
+}
+
+impl CompletionGuard {
+    fn new(runtime: SubAgentRuntime, agent_id: String) -> Self {
+        Self {
+            runtime,
+            agent_id,
+            armed: true,
+        }
+    }
+
+    /// Disarm the guard — call this after `emit_parent_completion`
+    /// succeeds on the normal path.
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for CompletionGuard {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        tracing::warn!(
+            target: "subagent",
+            "CompletionGuard: sub-agent {} exited without emitting completion — sending synthetic failure",
+            self.agent_id,
+        );
+        let payload = format!(
+            "Failed: sub-agent {} exited unexpectedly (panic/abort)\n{}",
+            self.agent_id,
+            subagent_failed_sentinel(
+                &self.agent_id,
+                "sub-agent task exited without completing (possible panic or abort)"
+            ),
+        );
+        emit_parent_completion(&self.runtime, &self.agent_id, &payload);
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 async fn run_subagent_task(task: SubAgentTask) {
+    // Install the panic/abort guard BEFORE running the inner task.
+    // If `run_subagent` panics (caught by `spawn_supervised`'s
+    // `catch_unwind`), the guard's `Drop` sends a synthetic completion
+    // so the parent's turn loop doesn't deadlock.
+    let mut guard = CompletionGuard::new(task.runtime.clone(), task.agent_id.clone());
+
     let result = run_subagent(
         &task.runtime,
         task.agent_id.clone(),
@@ -3560,6 +3618,10 @@ async fn run_subagent_task(task: SubAgentTask) {
     // completion while its "running children" gate is still open. If we
     // update first, the parent can finalize before the completion arrives.
     emit_parent_completion(&task.runtime, &agent_id, &payload);
+    // Normal completion path ran — disarm the panic guard so it does NOT
+    // also emit a synthetic failure. The guard only fires now if the task
+    // unwinds (panic/abort) before reaching this line.
+    guard.disarm();
 
     let mut manager = task.manager_handle.write().await;
     match &result {

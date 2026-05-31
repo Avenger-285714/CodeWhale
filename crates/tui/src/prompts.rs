@@ -2,7 +2,7 @@
 //! System prompts for different modes.
 //!
 //! Prompts are assembled from composable layers loaded at compile time:
-//!   tool taxonomy → base.md → personality overlay → mode delta → approval policy
+//!   base.md → personality overlay → mode delta → approval policy → tool taxonomy
 //!
 //! This keeps each concern in its own file and makes prompt tuning
 //! a single-file operation.
@@ -494,11 +494,15 @@ fn approval_prompt_for_mode(mode: AppMode, approval_mode: ApprovalMode) -> &'sta
 }
 
 /// Compose the full system prompt in deterministic order:
-///   1. tool taxonomy  — compact hints generated from the eager core tools
-///   2. base.md        — core identity, toolbox, execution contract
-///   3. personality    — voice and tone overlay
-///   4. mode delta     — mode-specific permissions and workflow
-///   5. approval policy — tool-approval behavior
+///   1. base.md        — core identity, toolbox, execution contract
+///   2. personality    — voice and tone overlay
+///   3. mode delta     — mode-specific permissions and workflow
+///   4. approval policy — tool-approval behavior
+///   5. tool taxonomy  — compact hints generated from the eager core tools
+///
+/// Layers 1-2 are static and form the cache-stable prefix; layers 3-5 are
+/// mode-varying and grouped at the tail so a mode switch only invalidates
+/// the small mode-specific suffix, not the large static head.
 ///
 /// Each layer is separated by a blank line for readability in the
 /// rendered prompt (the model sees them as contiguous sections).
@@ -591,14 +595,21 @@ pub fn compose_prompt_with_approval_and_model(
     approval_mode: ApprovalMode,
     model_id: &str,
 ) -> String {
-    let tool_taxonomy = render_core_tool_taxonomy_block(mode);
     let base_prompt = apply_model_template(BASE_PROMPT.trim(), model_id);
+    let tool_taxonomy = render_core_tool_taxonomy_block(mode);
+    // Cache placement: the taxonomy is *mode-varying* (Plan omits `run_tests`).
+    // Keep it at the tail, grouped with the other mode-varying layers
+    // (mode delta, approval policy), so the large static head — `base.md`
+    // plus the personality overlay — stays a byte-stable prefix across mode
+    // switches. Putting it first (ahead of `base.md`) made every Tab between
+    // Plan/Agent/YOLO invalidate DeepSeek's KV prefix cache for the *entire*
+    // system prompt. Tail placement also gives the routing hint recency bias.
     let parts: [&str; 5] = [
-        tool_taxonomy.as_str(),
         base_prompt.as_str(),
         personality.prompt().trim(),
         mode_prompt(mode).trim(),
         approval_prompt_for_mode(mode, approval_mode).trim(),
+        tool_taxonomy.as_str(),
     ];
 
     let mut out =
@@ -1056,7 +1067,7 @@ mod tests {
     }
 
     #[test]
-    fn composed_prompt_starts_with_core_tool_taxonomy() {
+    fn composed_prompt_ends_with_core_tool_taxonomy() {
         let prompt = compose_prompt_with_approval_and_model(
             AppMode::Agent,
             Personality::Calm,
@@ -1065,9 +1076,15 @@ mod tests {
         );
         let expected_taxonomy = render_core_tool_taxonomy_block(AppMode::Agent);
 
+        // The taxonomy is mode-varying, so it lives at the tail (after the
+        // static base.md + personality head) to keep the prefix cache-stable.
         assert!(
-            prompt.starts_with(&expected_taxonomy),
-            "composed prompt should start with the compact generated tool taxonomy"
+            prompt.ends_with(&expected_taxonomy),
+            "composed prompt should end with the compact generated tool taxonomy"
+        );
+        assert!(
+            !prompt.starts_with(&expected_taxonomy),
+            "mode-varying taxonomy must not occupy the cache-stable prefix"
         );
     }
 
@@ -1082,8 +1099,8 @@ mod tests {
         let expected_taxonomy = render_core_tool_taxonomy_block(AppMode::Plan);
 
         assert!(
-            prompt.starts_with(&expected_taxonomy),
-            "Plan prompt should start with its mode-specific tool taxonomy"
+            prompt.ends_with(&expected_taxonomy),
+            "Plan prompt should end with its mode-specific tool taxonomy"
         );
         assert!(
             expected_taxonomy.contains("for discovery")

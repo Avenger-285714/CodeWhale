@@ -132,7 +132,7 @@ fn show_single_setting(app: &App, key: &str) -> CommandResult {
                     return CommandResult::error(format!("Failed to load config: {err}"));
                 }
             };
-            Some(config.deepseek_base_url())
+            Some(config.active_provider_base_url())
         }
         "locale" | "language" => Some(locale_display(app.ui_locale).to_string()),
         "theme" | "ui_theme" => {

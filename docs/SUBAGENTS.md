@@ -99,7 +99,7 @@ the next turn.
 ## Concurrency cap
 
 The dispatcher caps concurrent sub-agents at 10 by default
-(configurable via `[subagents].max_concurrent` in `~/.deepseek/config.toml`,
+(configurable via `[subagents].max_concurrent` in `~/.codewhale/config.toml`,
 hard ceiling 20). When the parent hits the cap, `agent_open` returns
 an error with the cap value; the parent should use `agent_eval` to wait for a
 running agent to complete, or `agent_close` to cancel a running agent, before
@@ -117,7 +117,7 @@ per-step timeout so a single stuck request can't pin the parent's
 completion wakeup channel indefinitely. The default is `120` seconds,
 which matches the legacy hardcoded value. Long-thinking children that
 legitimately exceed that, for example heavy plan or review work behind
-`agent_open`, can extend the timeout in `~/.deepseek/config.toml`:
+`agent_open`, can extend the timeout in `~/.codewhale/config.toml`:
 
 ```toml
 [subagents]

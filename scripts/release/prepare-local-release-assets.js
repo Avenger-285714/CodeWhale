@@ -8,6 +8,8 @@ const {
   allAssetNames,
   CHECKSUM_MANIFEST,
   detectBinaryNames,
+  WINDOWS_LAUNCHER_ASSET,
+  windowsLauncherContent,
 } = require("../../npm/codewhale/scripts/artifacts");
 
 async function sha256(filePath) {
@@ -38,10 +40,23 @@ async function main() {
       target: tui,
     },
   ];
+  if (isWindows) {
+    assets.push({
+      content: windowsLauncherContent(),
+      target: WINDOWS_LAUNCHER_ASSET,
+    });
+  }
 
   if (prepareAllAssets) {
     for (const assetName of allAssetNames()) {
       if (assets.some((asset) => asset.target === assetName)) {
+        continue;
+      }
+      if (assetName === WINDOWS_LAUNCHER_ASSET) {
+        assets.push({
+          content: windowsLauncherContent(),
+          target: assetName,
+        });
         continue;
       }
       assets.push({
@@ -58,7 +73,11 @@ async function main() {
   const manifestLines = [];
   for (const asset of assets) {
     const outputPath = path.join(outputDir, asset.target);
-    await fs.copyFile(asset.source, outputPath);
+    if (Object.prototype.hasOwnProperty.call(asset, "content")) {
+      await fs.writeFile(outputPath, asset.content, "utf8");
+    } else {
+      await fs.copyFile(asset.source, outputPath);
+    }
     manifestLines.push(`${await sha256(outputPath)}  ${asset.target}`);
   }
 

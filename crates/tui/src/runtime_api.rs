@@ -1,4 +1,4 @@
-//! Runtime HTTP/SSE API for local DeepSeek automation.
+//! Runtime HTTP/SSE API for local CodeWhale automation.
 
 use std::collections::HashSet;
 use std::convert::Infallible;
@@ -907,8 +907,7 @@ async fn list_skills(
     State(state): State<RuntimeApiState>,
 ) -> Result<Json<SkillsResponse>, ApiError> {
     let skills_dir = resolve_skills_dir(&state.config, &state.workspace);
-    let registry =
-        crate::skills::discover_for_workspace_and_dir(&state.workspace, &skills_dir);
+    let registry = crate::skills::discover_for_workspace_and_dir(&state.workspace, &skills_dir);
     let skill_state = state.skill_state.lock().await;
     let directories = crate::skills::skills_directories(&state.workspace);
     let skills = registry
@@ -936,13 +935,10 @@ async fn set_skill_enabled(
     Json(req): Json<SetSkillEnabledRequest>,
 ) -> Result<Json<SetSkillEnabledResponse>, ApiError> {
     let skills_dir = resolve_skills_dir(&state.config, &state.workspace);
-    let registry =
-        crate::skills::discover_for_workspace_and_dir(&state.workspace, &skills_dir);
+    let registry = crate::skills::discover_for_workspace_and_dir(&state.workspace, &skills_dir);
     let exists = registry.list().iter().any(|skill| skill.name == name);
     if !exists {
-        return Err(ApiError::not_found(format!(
-            "skill '{name}' not found"
-        )));
+        return Err(ApiError::not_found(format!("skill '{name}' not found")));
     }
 
     let mut store = state.skill_state.lock().await;

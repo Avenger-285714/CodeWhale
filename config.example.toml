@@ -35,9 +35,9 @@ base_url = "https://api.deepseek.com/beta"
 #   deepseek-v4-flash           — fast, cost-efficient (legacy aliases: deepseek-chat, deepseek-reasoner)
 #   deepseek-ai/deepseek-v4-pro   — NVIDIA NIM-hosted Pro model ID
 #   deepseek-ai/deepseek-v4-flash — NVIDIA NIM-hosted Flash model ID
-#   gpt-4.1                         — default generic OpenAI-compatible model ID
+#   deepseek-v4-pro                 — default generic OpenAI-compatible model ID
 #   deepseek-ai/deepseek-v4-flash   — default AtlasCloud model ID
-#   deepseek-reasoner               — default Wanjie Ark model ID
+#   deepseek-v4-pro                 — default Wanjie Ark model ID
 #   accounts/fireworks/models/deepseek-v4-pro — Fireworks AI Pro model ID
 #   deepseek-ai/DeepSeek-V4-Pro    — SGLang self-hosted Pro model ID
 #   deepseek-ai/DeepSeek-V4-Flash  — SGLang self-hosted Flash model ID
@@ -231,7 +231,7 @@ max_subagents = 10 # optional (1-20)
 [providers.wanjie_ark]
 # api_key = "YOUR_WANJIE_API_KEY"
 # base_url = "https://maas-openapi.wanjiedata.com/api/v1"
-# model = "deepseek-reasoner"                # or the exact model ID enabled on your Wanjie account
+# model = "deepseek-v4-pro"                  # or the exact model ID enabled on your Wanjie account
 
 # OpenRouter — multi-provider gateway (https://openrouter.ai)
 [providers.openrouter]
@@ -272,7 +272,9 @@ max_subagents = 10 # optional (1-20)
 # Xiaomi MiMo Token Plan (https://platform.xiaomimimo.com/docs/zh-CN/price/tokenplan/quick-access)
 [providers.xiaomi]
 # api_key = "tp-YOUR_MIMO_API_KEY"           # Token Plan key (tp-xxxxx)
-# base_url = "https://token-plan-cn.xiaomimimo.com/v1"  # cn / sgp / ams cluster
+# cluster = "cn"                             # cn (default) | sgp (Singapore) | ams (Amsterdam)
+#                                            #   picks the official base_url for you
+# base_url = "https://token-plan-cn.xiaomimimo.com/v1"  # optional — overrides `cluster`
 # model = "mimo-v2.5-pro"                    # mimo-v2.5-pro | mimo-v2.5
 
 # ─────────────────────────────────────────────────────────────────────────────────

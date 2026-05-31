@@ -205,6 +205,11 @@ pub fn backup_before_migrate(path: &Path, domain: &str) -> PathBuf {
 /// 3. Bump `CURRENT_VERSION` to match.
 /// 4. Wire `<Domain>Migration::migrate(...)` into the load function in
 ///    the owning module.
+// Scaffolding: these registrations describe the framework's wiring contract
+// but are not constructed until a domain ships its first schema bump (step 4
+// in the doc above). Allow dead_code so the documented framework can land
+// ahead of its first use without tripping `-D warnings`.
+#[allow(dead_code)]
 pub mod registry {
     use super::{MigrationFn, SchemaMigration};
 

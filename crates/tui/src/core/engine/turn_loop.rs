@@ -23,7 +23,7 @@ impl Engine {
         // Signal to the terminal / taskbar that a turn is in progress
         // (OSC 9 ; 4 indeterminate progress + title spinner).
         crate::tui::notifications::set_taskbar_progress_busy();
-        crate::tui::notifications::start_title_animation("DeepSeek TUI");
+        crate::tui::notifications::start_title_animation("CodeWhale");
 
         let client = self
             .deepseek_client
@@ -943,44 +943,105 @@ impl Engine {
                                 "Waiting on {running} sub-agent(s) to complete..."
                             )))
                             .await;
-                        tokio::select! {
-                            biased;
-                            () = self.cancel_token.cancelled() => {
-                                let _ = self
-                                    .tx_event
-                                    .send(Event::status(
-                                        "Request cancelled while waiting for sub-agents",
-                                    ))
-                                    .await;
-                                return (TurnOutcomeStatus::Interrupted, None);
-                            }
-                            Some(c) = self.rx_subagent_completion.recv() => {
-                                completions.push(c);
-                                while let Ok(extra) = self.rx_subagent_completion.try_recv() {
-                                    completions.push(extra);
+                        // Heartbeat: periodic re-check for children that
+                        // exited without emitting a parent completion (e.g.
+                        // panic caught by spawn_supervised).  Without this
+                        // branch, `rx_subagent_completion.recv()` blocks
+                        // forever when every child handle has finished but no
+                        // completion was sent: a permanent deadlock.
+                        let mut subagent_heartbeat = tokio::time::interval(Duration::from_secs(15));
+                        subagent_heartbeat
+                            .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                        // Skip the immediate first tick.
+                        subagent_heartbeat.tick().await;
+                        let subagent_wait_started = Instant::now();
+                        let mut continue_turn_after_wait = false;
+                        loop {
+                            tokio::select! {
+                                biased;
+                                () = self.cancel_token.cancelled() => {
+                                    let _ = self
+                                        .tx_event
+                                        .send(Event::status(
+                                            "Request cancelled while waiting for sub-agents",
+                                        ))
+                                        .await;
+                                    return (TurnOutcomeStatus::Interrupted, None);
                                 }
-                            }
-                            Some(steer) = self.rx_steer.recv() => {
-                                let trimmed = steer.trim().to_string();
-                                if !trimmed.is_empty() {
-                                    self.session
-                                        .working_set
-                                        .observe_user_message(&trimmed, &self.session.workspace);
-                                    self.add_session_message(
-                                        self.user_text_message_with_turn_metadata(trimmed.clone()),
-                                    )
-                                    .await;
+                                Some(c) = self.rx_subagent_completion.recv() => {
+                                    completions.push(c);
+                                    while let Ok(extra) = self.rx_subagent_completion.try_recv() {
+                                        completions.push(extra);
+                                    }
+                                    break;
+                                }
+                                Some(steer) = self.rx_steer.recv() => {
+                                    let trimmed = steer.trim().to_string();
+                                    if !trimmed.is_empty() {
+                                        self.session
+                                            .working_set
+                                            .observe_user_message(&trimmed, &self.session.workspace);
+                                        self.add_session_message(
+                                            self.user_text_message_with_turn_metadata(trimmed.clone()),
+                                        )
+                                        .await;
+                                        let _ = self
+                                            .tx_event
+                                            .send(Event::status(format!(
+                                                "Steer input accepted: {}",
+                                                summarize_text(&trimmed, 120)
+                                            )))
+                                            .await;
+                                    }
+                                    turn.next_step();
+                                    continue_turn_after_wait = true;
+                                    break;
+                                }
+                                _ = subagent_heartbeat.tick() => {
+                                    // Re-check: are children still alive?
+                                    let still_running = {
+                                        let mgr = self.subagent_manager.read().await;
+                                        mgr.running_count()
+                                    };
+                                    if still_running == 0 {
+                                        // All child handles finished but no
+                                        // completion was delivered: one or more
+                                        // children exited abnormally (panic,
+                                        // abort, or dropped channel). Break the
+                                        // wait so the turn can finish.
+                                        tracing::warn!(
+                                            target: "engine::turn_loop",
+                                            "Sub-agent heartbeat: no running sub-agents and no completion received after {:.1}s - breaking wait (likely panic/abort)",
+                                            subagent_wait_started.elapsed().as_secs_f64(),
+                                        );
+                                        let _ = self
+                                            .tx_event
+                                            .send(Event::status(
+                                                "Sub-agent(s) exited without completion signal - resuming turn",
+                                            ))
+                                            .await;
+                                        break;
+                                    }
+
+                                    let elapsed = subagent_wait_started.elapsed();
+                                    tracing::info!(
+                                        target: "engine::turn_loop",
+                                        "Sub-agent heartbeat: {} still running after {:.1}s",
+                                        still_running,
+                                        elapsed.as_secs_f64(),
+                                    );
                                     let _ = self
                                         .tx_event
                                         .send(Event::status(format!(
-                                            "Steer input accepted: {}",
-                                            summarize_text(&trimmed, 120)
+                                            "Still waiting on {still_running} sub-agent(s) after {:.0}s...",
+                                            elapsed.as_secs_f64()
                                         )))
                                         .await;
                                 }
-                                turn.next_step();
-                                continue;
                             }
+                        }
+                        if continue_turn_after_wait {
+                            continue;
                         }
                     }
                 }

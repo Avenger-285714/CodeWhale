@@ -43,6 +43,9 @@ Invoke-WebRequest \`
 Invoke-WebRequest \`
   -Uri https://github.com/Hmbown/CodeWhale/releases/latest/download/codewhale-tui-windows-x64.exe \`
   -OutFile "$dest\\codewhale-tui.exe"
+Invoke-WebRequest \`
+  -Uri https://github.com/Hmbown/CodeWhale/releases/latest/download/codewhale.bat \`
+  -OutFile "$dest\\codewhale.bat"
 
 $Env:Path = "$dest;$Env:Path"`,
 };
@@ -58,7 +61,8 @@ sha256sum -c codewhale-artifacts-sha256.txt --ignore-missing`,
 sha256sum -c codewhale-artifacts-sha256.txt --ignore-missing`,
   "windows-x64": `# PowerShell
 Get-FileHash "$Env:USERPROFILE\\bin\\codewhale.exe" -Algorithm SHA256
-Get-FileHash "$Env:USERPROFILE\\bin\\codewhale-tui.exe" -Algorithm SHA256`,
+Get-FileHash "$Env:USERPROFILE\\bin\\codewhale-tui.exe" -Algorithm SHA256
+Get-FileHash "$Env:USERPROFILE\\bin\\codewhale.bat" -Algorithm SHA256`,
 };
 
 const LABELS: Record<Arch, string> = {

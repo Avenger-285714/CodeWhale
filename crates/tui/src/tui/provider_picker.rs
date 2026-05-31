@@ -476,7 +476,9 @@ mod tests {
                 "OpenRouter",
                 "Novita AI",
                 "Fireworks AI",
-                "Moonshot/Kimi",
+                // Moonshot/Kimi was soft-removed from the picker in v0.8.48
+                // (the variant + credential handling remain for existing
+                // users, but it is no longer offered in the provider list).
                 "SGLang",
                 "vLLM",
                 "Ollama",

@@ -181,18 +181,37 @@ struct TokenBucket {
 }
 
 impl TokenBucket {
-    fn from_env() -> Self {
+    /// Build a rate limiter with provider-aware defaults.
+    ///
+    /// Xiaomi MiMo has strict per-key rate limits (~2-3 RPS); spawning
+    /// multiple sub-agents at the default 8 RPS overwhelms the API with
+    /// 429s.  When the provider is `Xiaomi` and the user hasn't overridden
+    /// via env vars, we tighten the defaults.
+    fn from_env_with_provider(provider: Option<ApiProvider>) -> Self {
+        let (default_rps, default_burst) = match provider {
+            Some(ApiProvider::Xiaomi) => (2.0, 3.0),
+            _ => (
+                DEFAULT_CLIENT_RATE_LIMIT_RPS,
+                DEFAULT_CLIENT_RATE_LIMIT_BURST,
+            ),
+        };
         let rps = std::env::var("DEEPSEEK_RATE_LIMIT_RPS")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_CLIENT_RATE_LIMIT_RPS)
+            .unwrap_or(default_rps)
             .max(0.0);
         let burst = std::env::var("DEEPSEEK_RATE_LIMIT_BURST")
             .ok()
             .and_then(|v| v.parse::<f64>().ok())
-            .unwrap_or(DEFAULT_CLIENT_RATE_LIMIT_BURST)
+            .unwrap_or(default_burst)
             .max(1.0);
         let enabled = rps > 0.0;
+        if matches!(provider, Some(ApiProvider::Xiaomi)) {
+            tracing::info!(
+                target: "rate_limiter",
+                "MiMo rate limit: rps={rps}, burst={burst} (override with DEEPSEEK_RATE_LIMIT_RPS/BURST)"
+            );
+        }
         Self {
             enabled,
             capacity: burst,
@@ -398,7 +417,9 @@ pub(super) fn api_url(base_url: &str, path: &str, path_suffix: Option<&str>) -> 
         return format!("{}/{}", unversioned_base_url(base_url), path);
     }
     if let Some(suffix) = path_suffix {
-        let base = unversioned_base_url(base_url).trim_end_matches('/').to_string();
+        let base = unversioned_base_url(base_url)
+            .trim_end_matches('/')
+            .to_string();
         let suffix = suffix.trim_matches('/');
         if suffix.is_empty() {
             return format!("{base}/{path}");
@@ -477,8 +498,8 @@ fn add_extra_root_certs(
 impl DeepSeekClient {
     /// Create a DeepSeek client from CLI configuration.
     pub fn new(config: &Config) -> Result<Self> {
-        let api_key = config.deepseek_api_key()?;
-        let base_url = config.deepseek_base_url();
+        let api_key = config.active_provider_api_key()?;
+        let base_url = config.active_provider_base_url();
         let api_provider = config.api_provider();
         validate_base_url_security(&base_url)?;
         let retry = config.retry_policy();
@@ -512,7 +533,9 @@ impl DeepSeekClient {
             retry,
             default_model,
             connection_health: Arc::new(AsyncMutex::new(ConnectionHealth::default())),
-            rate_limiter: Arc::new(AsyncMutex::new(TokenBucket::from_env())),
+            rate_limiter: Arc::new(AsyncMutex::new(TokenBucket::from_env_with_provider(Some(
+                api_provider,
+            )))),
             path_suffix,
         })
     }
@@ -595,7 +618,11 @@ impl DeepSeekClient {
         model: &str,
         target_language: &str,
     ) -> Result<String> {
-        let url = api_url(&self.base_url, "chat/completions", self.path_suffix.as_deref());
+        let url = api_url(
+            &self.base_url,
+            "chat/completions",
+            self.path_suffix.as_deref(),
+        );
         let mut body = serde_json::json!({
             "model": model,
             "messages": [
@@ -1100,7 +1127,11 @@ impl DeepSeekClient {
         suffix: &str,
         max_tokens: u32,
     ) -> anyhow::Result<String> {
-        let url = api_url(&self.base_url, "beta/completions", self.path_suffix.as_deref());
+        let url = api_url(
+            &self.base_url,
+            "beta/completions",
+            self.path_suffix.as_deref(),
+        );
         let body = json!({
             "model": model,
             "prompt": prompt,

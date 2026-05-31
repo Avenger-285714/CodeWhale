@@ -35,10 +35,12 @@ codewhale doctor
 codewhale
 ```
 
-The `codewhale` facade and `codewhale-tui` binary share `~/.deepseek/config.toml`
-for DeepSeek auth and default model settings. Common TUI commands are available
-directly through the facade, including `codewhale doctor`, `codewhale models`,
-`codewhale sessions`, and `codewhale resume --last`.
+The `codewhale` facade and `codewhale-tui` binary share
+`~/.codewhale/config.toml` for auth, provider, and default model settings.
+Legacy `~/.deepseek/config.toml` installs are still read as a fallback. Common
+TUI commands are available directly through the facade, including
+`codewhale doctor`, `codewhale models`, `codewhale sessions`, and
+`codewhale resume --last`.
 
 The app talks to DeepSeek's documented OpenAI-compatible Chat Completions API.
 Set `DEEPSEEK_BASE_URL` only if you need the China endpoint or DeepSeek beta
@@ -64,7 +66,7 @@ Prebuilt binaries for the GitHub release are downloaded automatically:
 - Linux x64
 - Linux arm64 (v0.8.8+)
 - macOS x64 / arm64
-- Windows x64
+- Windows x64 (`codewhale.exe`, `codewhale-tui.exe`, and `codewhale.bat`)
 
 Other platform/architecture combinations (musl, riscv64, FreeBSD, …) aren't
 shipped as prebuilts. Unsupported platforms, checksum failures, and glibc
@@ -79,9 +81,11 @@ build-from-source guide.
   (with `deepseekBinaryVersion` as a backward-compat fallback).
 - Set `DEEPSEEK_TUI_VERSION` or `DEEPSEEK_VERSION` to override the release version.
 - Set `DEEPSEEK_TUI_GITHUB_REPO` or `DEEPSEEK_GITHUB_REPO` to override the source repo (defaults to `Hmbown/CodeWhale`).
-- Set `DEEPSEEK_TUI_RELEASE_BASE_URL` to use an internal or mirrored
-  release-asset directory when GitHub Releases is unavailable. The directory
-  must contain `codewhale-artifacts-sha256.txt` and the platform binaries.
+- Set `CODEWHALE_RELEASE_BASE_URL` to use an internal or mirrored release-asset
+  directory when GitHub Releases is unavailable. Legacy
+  `DEEPSEEK_TUI_RELEASE_BASE_URL` and `DEEPSEEK_RELEASE_BASE_URL` aliases are
+  still accepted. The directory must contain `codewhale-artifacts-sha256.txt`
+  and the platform binaries.
 - Set `DEEPSEEK_TUI_FORCE_DOWNLOAD=1` to force download even when the cached binary is already present.
 - Set `DEEPSEEK_TUI_DISABLE_INSTALL=1` to skip install-time download.
 - Set `DEEPSEEK_TUI_OPTIONAL_INSTALL=1` to make install-time retryable download

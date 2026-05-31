@@ -220,20 +220,20 @@ Without this mount the container starts fresh each time.
 If you bind-mount an existing host directory instead, the image runs as the
 non-root `codewhale` user with UID/GID `1000:1000`. The mounted directory must be
 writable by that user, or startup can fail while creating runtime directories
-under `.deepseek/tasks`. On Linux hosts, either use the named volume above or
+under `.codewhale/tasks`. On Linux hosts, either use the named volume above or
 prepare the bind mount explicitly:
 
 ```bash
-mkdir -p ~/.deepseek
-sudo chown -R 1000:1000 ~/.deepseek
+mkdir -p ~/.codewhale
+sudo chown -R 1000:1000 ~/.codewhale
 
 docker run --rm -it \
   -e DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
-  -v ~/.deepseek:/home/codewhale/.deepseek \
+  -v ~/.codewhale:/home/codewhale/.codewhale \
   ghcr.io/hmbown/codewhale:latest
 ```
 
-That `chown` changes ownership of the host `~/.deepseek` directory. Skip it if
+That `chown` changes ownership of the host `~/.codewhale` directory. Skip it if
 you do not want the container UID to own your local config, and use a named
 volume instead.
 

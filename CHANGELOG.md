@@ -20,12 +20,31 @@ This release bundles the work that was prepared on the v0.8.47 integration branc
 - **Closed-loop verification gate is active by default.** After every side-effect tool call (write, edit, apply_patch, exec_shell), the engine re-checks the claim before the result enters the session stream. Now ships with auto-retry on failure (up to 2 attempts), fuzzy-search correction for `edit_file`, and a Fin Flash inner-loop correction pass when the fuzzy match also misses.
 - **Permanent V4 Pro 75% discount.** Removed the time-gated 2026-05-31 cutoff; the lower rate is now permanent (#1937, contributed by Colorful-glassblock).
 - **Model picker per-provider slices.** Replaced the boolean `hide_deepseek_models` flag with per-provider model/effort slices; resolves model-picker drift when running on non-DeepSeek providers.
+- **Prompt-cache layout stays stable across mode switches.** Moved the mode-varying tool taxonomy to the dynamic tail of the system prompt so Plan/Agent/YOLO switches preserve the static prefix cache.
 
 ### Fixed
 
 - **DEEPSEEK.md removed from project-context files** to align with the rename to CodeWhale.
 - **Two clippy regressions on `main`** (`useless_format` in `commands/config.rs`, `redundant_closure` in `runtime_log.rs`) folded in from PR #2237.
 - **PDF/image reads moved to `spawn_blocking`** to stop blocking the async runtime on slow disk or large PDFs.
+- **Sub-agent completion deadlock.** Direct child sub-agents now guarantee a parent completion signal even on panic/abort, and the parent turn loop re-checks live child state while waiting instead of parking forever.
+- **Hidden release/agent worktrees no longer saturate discovery.** File mentions and picker walks now prune `.worktrees/`, `.claude/worktrees/`, `.deepseek/snapshots/`, and common build/dependency bulk before descent (#2211).
+- **Cycle-briefing stalls no longer freeze turn completion.** Pre-`TurnComplete` briefing calls now time out and fall back to skipping cycle advance rather than blocking the user turn indefinitely.
+- **MCP stdio server startup no longer panics under async main.** `codewhale-tui serve --mcp` runs its blocking stdio server outside the async runtime context that launches the CLI.
+- **Provider/model display drift.** The TUI now derives its fallback model from the effective provider after saved `default_provider` overrides, keeping the header chip, footer, and client target aligned.
+- **Approval dialogs keep tool parameters.** Approval prompts now carry tool input on the approval event itself, so params do not collapse to `{}` if message-complete handling drains pending tool metadata first.
+- **Literal slash messages.** Composer inputs such as `/ hello` are now treated as normal user messages instead of slash commands.
+- **Terminal title/help rebrand.** In-progress and completion terminal-title markers plus the `codewhale-tui --help` summary now say CodeWhale instead of the old DeepSeek TUI framing.
+- **Statusline picker navigation.** The `/statusline` picker keeps the highlighted row visible in short terminals, wraps Up/Down at list edges, and renders a continuous selected-row highlight (#2324, contributed by reidliu41).
+- **CJK/IME composer input.** Non-ASCII IME commits route directly into the composer instead of getting trapped in paste-burst buffering, with Windows console IME mode restored after raw-mode setup (#2330, contributed by donglovejava).
+- **Compaction liveness label.** Long compaction phases now use the same animated working footer label and elapsed timer as loading turns (#2302, contributed by donglovejava).
+- **Xiaomi/MiMo sub-agent rate limiting.** Provider-aware request pacing avoids bursty sub-agent fan-out hitting Xiaomi 429s.
+- **Test and crash isolation.** Unit tests no longer read the developer's live `settings.toml` by default, and panic-dump tests redirect crash logs away from the real user crash directory.
+- **Feishu bridge env rename window.** The Feishu/Lark bridge accepts `CODEWHALE_*` runtime env names while preserving existing `DEEPSEEK_*` configs.
+- **Windows release launcher asset.** The release asset list now includes `codewhale.bat`, and both local release prep and the GitHub release workflow generate it with the low-motion env set before launch (#1861, contributed by cy2311).
+- **Config/settings path convergence.** Runtime config, TUI settings, READMEs, and website docs now use `~/.codewhale/` as the canonical state root while retaining `~/.deepseek/` and old XDG settings fallbacks; config home resolution also respects `HOME` for Cygwin-style shells (#2322 reported by yyyCode; #2369 reported by buko).
+- **Deferred tool search returns enough MCP hits.** `tool_search_tool_regex` and `tool_search_tool_bm25` now default to 20 results, expose `max_results`, and cap at 100 so overlapping MCP tool keywords do not hide later servers (#2344, contributed by nightt5879; #2339 reported by T-Phuong-Nguyen).
+- **Dependency refresh.** Updated `tar` from 0.4.45 to 0.4.46.
 
 ### Deprecated
 

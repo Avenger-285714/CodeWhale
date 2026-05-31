@@ -24,7 +24,7 @@ use ratatui::{
 
 use crate::palette;
 use crate::tui::views::{ModalKind, ModalView, ViewAction, ViewEvent};
-use crate::workspace_discovery::{DISCOVERY_ALWAYS_DIRS, path_is_excluded_from_discovery};
+use crate::workspace_discovery::{DISCOVERY_ALWAYS_DIRS, should_skip_unignored_discovery_entry};
 
 /// Maximum number of candidates collected from the initial walk. Keeps memory
 /// bounded for very large monorepos; matches the limits codex-rs uses for the
@@ -450,11 +450,11 @@ fn collect_candidates(root: &Path) -> Vec<String> {
             .git_ignore(false)
             .ignore(false)
             .max_depth(Some(WALK_DEPTH.saturating_sub(1)));
+        let root_for_filter = root.to_path_buf();
+        dot_builder.filter_entry(move |entry| {
+            !should_skip_unignored_discovery_entry(&root_for_filter, entry.path())
+        });
         for entry in dot_builder.build().flatten() {
-            // Exclude machine-generated bulk (e.g. .deepseek/snapshots/).
-            if path_is_excluded_from_discovery(root, entry.path()) {
-                continue;
-            }
             if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
@@ -753,6 +753,18 @@ mod tests {
 
         fs::create_dir_all(root.join(".claude/commands")).unwrap();
         fs::write(root.join(".claude/commands/test.md"), "test").unwrap();
+        fs::create_dir_all(root.join(".claude/commands/node_modules/pkg")).unwrap();
+        fs::write(
+            root.join(".claude/commands/node_modules/pkg/generated.js"),
+            "module",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join(".deepseek/commands/target/debug")).unwrap();
+        fs::write(
+            root.join(".deepseek/commands/target/debug/build-artifact"),
+            "artifact",
+        )
+        .unwrap();
         fs::create_dir_all(root.join(".claude/worktrees/agent/src")).unwrap();
         fs::write(
             root.join(".claude/worktrees/agent/src/agent-only.md"),
@@ -786,6 +798,12 @@ mod tests {
                 .iter()
                 .all(|path| !path.starts_with(".claude/worktrees/")),
             ".claude worktree files must not enter picker candidates: {candidates:?}",
+        );
+        assert!(
+            candidates
+                .iter()
+                .all(|path| !path.contains("/node_modules/") && !path.contains("/target/")),
+            "dot-dir dependency/build bulk must not enter picker candidates: {candidates:?}",
         );
     }
 }

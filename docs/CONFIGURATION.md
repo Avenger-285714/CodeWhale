@@ -9,11 +9,13 @@ only the provider and safety knobs you need.
 
 Default config path:
 
-- `~/.deepseek/config.toml`
+- `~/.codewhale/config.toml`
+- Legacy fallback: `~/.deepseek/config.toml`
 
 Overrides:
 
 - CLI: `codewhale --config /path/to/config.toml`
+- Env: `CODEWHALE_CONFIG_PATH=/path/to/config.toml`
 - Env: `DEEPSEEK_CONFIG_PATH=/path/to/config.toml`
 
 If both are set, `--config` wins. Environment variable overrides are applied after the file is loaded.
@@ -21,10 +23,11 @@ If both are set, `--config` wins. Environment variable overrides are applied aft
 ### Per-project overlay (#485)
 
 When the TUI starts in a workspace that contains a
-`<workspace>/.deepseek/config.toml` file, the values declared in that
-file are merged on top of the global config. This lets a repo lock its
-own provider, model, sandbox policy, or approval policy without
-touching the user's `~/.deepseek/config.toml`. Pass
+`<workspace>/.codewhale/config.toml` file, the values declared in that
+file are merged on top of the global config. Legacy
+`<workspace>/.deepseek/config.toml` is still read as a fallback. This lets a
+repo lock its own provider, model, sandbox policy, or approval policy without
+touching the user's `~/.codewhale/config.toml`. Pass
 `--no-project-config` to skip the overlay for one launch.
 
 Supported keys in the project overlay (top-level fields only):
@@ -52,7 +55,7 @@ specific use case.
 The `codewhale` facade and `codewhale-tui` binary share the same config file for
 DeepSeek auth and model defaults. `codewhale auth set --provider deepseek` (and
 the legacy `codewhale login --api-key ...` alias) saves the key to
-`~/.deepseek/config.toml`, and `codewhale --model deepseek-v4-flash` is forwarded
+`~/.codewhale/config.toml`, and `codewhale --model deepseek-v4-flash` is forwarded
 to the TUI as `DEEPSEEK_MODEL`.
 
 Credential lookup uses `config -> keyring -> env` after any explicit CLI
@@ -63,8 +66,10 @@ provider's keyring entry.
 
 For hosted, generic OpenAI-compatible, or self-hosted providers, set
 `provider = "nvidia-nim"`, `"openai"`, `"atlascloud"`, `"wanjie-ark"`,
-`"openrouter"`, `"novita"`, `"fireworks"`, `"moonshot"`, `"sglang"`,
-`"vllm"`, or `"ollama"` or pass `codewhale --provider <name>`.
+`"openrouter"`, `"novita"`, `"fireworks"`, `"xiaomi"`, `"sglang"`,
+`"vllm"`, or `"ollama"` or pass `codewhale --provider <name>`. Existing
+`"moonshot"` / `"kimi"` configs still parse, but the provider is deprecated in
+the v0.8.48 picker.
 For the provider-by-provider registry, including auth variables, default base
 URLs, model IDs, and capability metadata, see [PROVIDERS.md](PROVIDERS.md).
 The facade saves provider credentials to the shared user config and forwards
@@ -80,7 +85,7 @@ to `https://api.openai.com/v1`, accepts `OPENAI_BASE_URL`, and defaults to
 `https://api.atlascloud.ai/v1`, accepts `ATLASCLOUD_BASE_URL`, and uses
 `deepseek-ai/deepseek-v4-flash` as its default model. `wanjie-ark` targets
 Wanjie Ark's OpenAI-compatible endpoint at
-`https://maas-openapi.wanjiedata.com/api/v1`, defaults to `deepseek-reasoner`,
+`https://maas-openapi.wanjiedata.com/api/v1`, defaults to `deepseek-v4-pro`,
 and passes model IDs through unchanged because Wanjie model access is
 account-scoped. SGLang, vLLM, and Ollama are
 self-hosted and can run without an API key by default. Ollama defaults to
@@ -207,7 +212,7 @@ aliases. When both forms are set the `CODEWHALE_*` value wins; the
 `DEEPSEEK_*` form is kept for older shells:
 
 - `CODEWHALE_PROVIDER` (preferred) / `DEEPSEEK_PROVIDER` (legacy alias) —
-  `deepseek|nvidia-nim|openai|atlascloud|wanjie-ark|openrouter|novita|fireworks|moonshot|sglang|vllm|ollama`
+  `deepseek|nvidia-nim|openai|atlascloud|wanjie-ark|openrouter|novita|fireworks|xiaomi|sglang|vllm|ollama`
 - `CODEWHALE_MODEL` (preferred) / `DEEPSEEK_MODEL` (legacy alias) — default model for the active provider
 - `CODEWHALE_BASE_URL` (preferred) / `DEEPSEEK_BASE_URL` (legacy alias) — base URL for the active provider
 
@@ -260,11 +265,12 @@ Remaining variables:
 - `DEEPSEEK_MANAGED_CONFIG_PATH`
 - `DEEPSEEK_REQUIREMENTS_PATH`
 - `DEEPSEEK_MAX_SUBAGENTS` (clamped to `1..=20`)
-- `DEEPSEEK_TASKS_DIR` (runtime task queue/artifact storage, default `~/.deepseek/tasks`)
+- `DEEPSEEK_TASKS_DIR` (runtime task queue/artifact storage, default `~/.codewhale/tasks`)
 - `DEEPSEEK_ALLOW_INSECURE_HTTP` (`1`/`true` allows non-local `http://` base URLs; default is reject)
 - `DEEPSEEK_FORCE_HTTP1` (`1|true|yes|on` pins the HTTP client to HTTP/1.1, disabling HTTP/2; useful on Windows or behind proxies that mishandle long-lived H2 streams)
-- `DEEPSEEK_HOME` (override the base data directory; defaults to `~/.deepseek`)
-- `DEEPSEEK_AUTOMATIONS_DIR` (override the automations storage directory; defaults to `~/.deepseek/automations`)
+- `CODEWHALE_HOME` (override the canonical base data directory; defaults to `~/.codewhale`)
+- `DEEPSEEK_HOME` (legacy metrics/session override for compatibility)
+- `DEEPSEEK_AUTOMATIONS_DIR` (override the automations storage directory; default prefers `~/.codewhale/automations` with `~/.deepseek/automations` fallback)
 - `DEEPSEEK_CAPACITY_ENABLED`
 - `DEEPSEEK_CAPACITY_LOW_RISK_MAX`
 - `DEEPSEEK_CAPACITY_MEDIUM_RISK_MAX`
@@ -298,7 +304,7 @@ concatenated, in declared order, alongside the auto-loaded
 ```toml
 instructions = [
     "./AGENTS.md",
-    "~/.deepseek/global.md",
+    "~/.codewhale/global.md",
     "~/team/agents-shared.md",
 ]
 ```
@@ -310,7 +316,7 @@ Rules:
   truncated with a `[…elided]` marker rather than skipped.
 - Missing files are skipped with a tracing warning so a stale
   entry doesn't fail the launch.
-- Project config (`<workspace>/.deepseek/config.toml`)
+- Project config (`<workspace>/.codewhale/config.toml`, with legacy `<workspace>/.deepseek/config.toml` fallback)
   **replaces** the user array wholesale rather than merging.
   If you want both, list `~/global.md` inside the project
   array. Set `instructions = []` in the project to clear the
@@ -329,7 +335,7 @@ hook-system documentation for the full schema.
 ### Composer stash (`/stash`, Ctrl+S)
 
 Press **Ctrl+S** in the composer to park the current draft to
-`~/.deepseek/composer_stash.jsonl`. `/stash list` shows parked
+`~/.codewhale/composer_stash.jsonl` (legacy `~/.deepseek/composer_stash.jsonl` may still exist on older installs). `/stash list` shows parked
 drafts with one-line previews and timestamps; `/stash pop`
 restores the most recently parked draft (LIFO); `/stash clear`
 wipes the file. Capped at 200 entries; multiline drafts
@@ -339,7 +345,9 @@ round-trip intact.
 
 codewhale also stores user preferences in:
 
-- `~/.config/deepseek/settings.toml`
+- `~/.codewhale/settings.toml`
+- Existing `~/.deepseek/settings.toml` and `~/.config/deepseek/settings.toml`
+  files are read as fallbacks.
 
 Notable settings include `auto_compact` (default `false`), which opts into
 replacement-style summarization only near the active model limit. The default
@@ -441,10 +449,10 @@ If you are upgrading from older releases:
 
 ### Core keys (used by the TUI/engine)
 
-- `provider` (string, optional): `deepseek` (default), `nvidia-nim`, `openai`, `atlascloud`, `wanjie-ark`, `openrouter`, `novita`, `fireworks`, `moonshot`, `sglang`, `vllm`, or `ollama`. Legacy `deepseek-cn` configs are still accepted as an alias for `deepseek`; DeepSeek uses the same official host [`https://api.deepseek.com`](https://api-docs.deepseek.com/) worldwide. `nvidia-nim` targets NVIDIA's NIM-hosted DeepSeek endpoints through `https://integrate.api.nvidia.com/v1`; `openai` targets a generic OpenAI-compatible endpoint, defaulting to `https://api.openai.com/v1`; `atlascloud` targets AtlasCloud's OpenAI-compatible endpoint at `https://api.atlascloud.ai/v1`; `wanjie-ark` targets Wanjie Ark's OpenAI-compatible endpoint at `https://maas-openapi.wanjiedata.com/api/v1`; `openrouter` targets `https://openrouter.ai/api/v1`; `novita` targets `https://api.novita.ai/v1`; `fireworks` targets `https://api.fireworks.ai/inference/v1`; `moonshot` targets Moonshot/Kimi, defaulting to `https://api.moonshot.ai/v1`; `sglang` targets a self-hosted OpenAI-compatible endpoint, defaulting to `http://localhost:30000/v1`; `vllm` targets a self-hosted vLLM OpenAI-compatible endpoint, defaulting to `http://localhost:8000/v1`; `ollama` targets Ollama's OpenAI-compatible endpoint, defaulting to `http://localhost:11434/v1`.
+- `provider` (string, optional): `deepseek` (default), `nvidia-nim`, `openai`, `atlascloud`, `wanjie-ark`, `openrouter`, `novita`, `fireworks`, `xiaomi`, `sglang`, `vllm`, or `ollama`. Legacy `deepseek-cn` configs are still accepted as an alias for `deepseek`; DeepSeek uses the same official host [`https://api.deepseek.com`](https://api-docs.deepseek.com/) worldwide. `nvidia-nim` targets NVIDIA's NIM-hosted DeepSeek endpoints through `https://integrate.api.nvidia.com/v1`; `openai` targets a generic OpenAI-compatible endpoint, defaulting to `https://api.openai.com/v1`; `atlascloud` targets AtlasCloud's OpenAI-compatible endpoint at `https://api.atlascloud.ai/v1`; `wanjie-ark` targets Wanjie Ark's OpenAI-compatible endpoint at `https://maas-openapi.wanjiedata.com/api/v1`; `openrouter` targets `https://openrouter.ai/api/v1`; `novita` targets `https://api.novita.ai/v1`; `fireworks` targets `https://api.fireworks.ai/inference/v1`; `xiaomi` targets Xiaomi MiMo Token Plan, defaulting to the `cn` cluster; `sglang` targets a self-hosted OpenAI-compatible endpoint, defaulting to `http://localhost:30000/v1`; `vllm` targets a self-hosted vLLM OpenAI-compatible endpoint, defaulting to `http://localhost:8000/v1`; `ollama` targets Ollama's OpenAI-compatible endpoint, defaulting to `http://localhost:11434/v1`. Existing `moonshot` / `kimi` configs still load as deprecated compatibility routes.
 - `api_key` (string, required for hosted providers): must be non-empty for DeepSeek/hosted providers (or set the provider API key env var). Self-hosted SGLang, vLLM, and Ollama can omit it.
-- `base_url` (string, optional): defaults to `https://api.deepseek.com/beta` for DeepSeek's OpenAI-compatible Chat Completions API, including legacy `provider = "deepseek-cn"` configs. Other defaults are `https://integrate.api.nvidia.com/v1` for `nvidia-nim`, `https://api.openai.com/v1` for `openai`, `https://api.atlascloud.ai/v1` for `atlascloud`, `https://maas-openapi.wanjiedata.com/api/v1` for `wanjie-ark`, `https://openrouter.ai/api/v1` for `openrouter`, `https://api.novita.ai/v1` for `novita`, `https://api.fireworks.ai/inference/v1` for `fireworks`, `https://api.moonshot.ai/v1` for `moonshot`, `http://localhost:30000/v1` for `sglang`, `http://localhost:8000/v1` for `vllm`, and `http://localhost:11434/v1` for `ollama`. Set `https://api.deepseek.com` or `https://api.deepseek.com/v1` explicitly to opt out of DeepSeek beta features.
-- `default_text_model` (string, optional): defaults to `deepseek-v4-pro` for DeepSeek and generic OpenAI-compatible endpoints, `deepseek-ai/deepseek-v4-pro` for NVIDIA NIM, `deepseek-ai/deepseek-v4-flash` for AtlasCloud, `deepseek-reasoner` for Wanjie Ark, `deepseek/deepseek-v4-pro` for OpenRouter and Novita, `accounts/fireworks/models/deepseek-v4-pro` for Fireworks, `kimi-k2.6` for Moonshot, `deepseek-ai/DeepSeek-V4-Pro` for SGLang/vLLM, and `deepseek-coder:1.3b` for Ollama. Current public DeepSeek IDs are `deepseek-v4-pro` and `deepseek-v4-flash`, both with 1M context windows, 384K max output, and thinking mode enabled by default. Legacy `deepseek-chat` and `deepseek-reasoner` remain compatibility aliases for `deepseek-v4-flash` until July 24, 2026. Provider-specific mappings translate `deepseek-v4-pro` / `deepseek-v4-flash` to each provider's model ID where supported. Generic `openai`, `atlascloud`, `wanjie-ark`, and Ollama model IDs are passed through unchanged. OpenRouter provider configs with a custom `base_url` also preserve explicit model values, which lets OpenAI-compatible gateways accept bare model IDs. Use `/models` or `codewhale models` to discover live IDs from your configured endpoint. `CODEWHALE_MODEL` overrides this for a single process; `DEEPSEEK_MODEL` is the legacy alias.
+- `base_url` (string, optional): defaults to `https://api.deepseek.com/beta` for DeepSeek's OpenAI-compatible Chat Completions API, including legacy `provider = "deepseek-cn"` configs. Other defaults are `https://integrate.api.nvidia.com/v1` for `nvidia-nim`, `https://api.openai.com/v1` for `openai`, `https://api.atlascloud.ai/v1` for `atlascloud`, `https://maas-openapi.wanjiedata.com/api/v1` for `wanjie-ark`, `https://openrouter.ai/api/v1` for `openrouter`, `https://api.novita.ai/v1` for `novita`, `https://api.fireworks.ai/inference/v1` for `fireworks`, the Xiaomi MiMo `cn` cluster for `xiaomi`, `https://api.moonshot.ai/v1` for deprecated `moonshot`, `http://localhost:30000/v1` for `sglang`, `http://localhost:8000/v1` for `vllm`, and `http://localhost:11434/v1` for `ollama`. Set `https://api.deepseek.com` or `https://api.deepseek.com/v1` explicitly to opt out of DeepSeek beta features.
+- `default_text_model` (string, optional): defaults to `deepseek-v4-pro` for DeepSeek, generic OpenAI-compatible endpoints, and Wanjie Ark, `deepseek-ai/deepseek-v4-pro` for NVIDIA NIM, `deepseek-ai/deepseek-v4-flash` for AtlasCloud, `deepseek/deepseek-v4-pro` for OpenRouter and Novita, `accounts/fireworks/models/deepseek-v4-pro` for Fireworks, `mimo-v2.5-pro` for Xiaomi MiMo, `kimi-k2.6` for deprecated Moonshot, `deepseek-ai/DeepSeek-V4-Pro` for SGLang/vLLM, and `deepseek-coder:1.3b` for Ollama. Current public DeepSeek IDs are `deepseek-v4-pro` and `deepseek-v4-flash`, both with 1M context windows, 384K max output, and thinking mode enabled by default. Legacy `deepseek-chat` and `deepseek-reasoner` remain compatibility aliases for `deepseek-v4-flash` until July 24, 2026. Provider-specific mappings translate `deepseek-v4-pro` / `deepseek-v4-flash` to each provider's model ID where supported. Generic `openai`, `atlascloud`, `wanjie-ark`, and Ollama model IDs are passed through unchanged. OpenRouter provider configs with a custom `base_url` also preserve explicit model values, which lets OpenAI-compatible gateways accept bare model IDs. Use `/models` or `codewhale models` to discover live IDs from your configured endpoint. `CODEWHALE_MODEL` overrides this for a single process; `DEEPSEEK_MODEL` is the legacy alias.
 - `reasoning_effort` (string, optional): `off`, `low`, `medium`, `high`, or `max`; defaults to the configured UI tier. DeepSeek Platform receives top-level `thinking` / `reasoning_effort` fields. NVIDIA NIM receives equivalent settings through `chat_template_kwargs`.
 - `allow_shell` (bool, optional): defaults to `true` (sandboxed).
 - `approval_policy` (string, optional): `on-request`, `untrusted`, or `never`. Runtime `approval_mode` editing in `/config` also accepts `on-request` and `untrusted` aliases.
@@ -470,24 +478,24 @@ If you are upgrading from older releases:
   `[subagents.models]` accepts lower-case role or type keys such as `worker`,
   `explorer`, `general`, `explore`, `plan`, and `review`. Values must normalize
   to a supported DeepSeek model id before an agent is spawned.
-- `skills_dir` (string, optional): defaults to `~/.deepseek/skills` (each skill is
+- `skills_dir` (string, optional): defaults to `~/.codewhale/skills` (legacy `~/.deepseek/skills` is still discovered; each skill is
   a directory containing `SKILL.md`). Workspace-local `.agents/skills` or
   `./skills` are preferred when present; the runtime also discovers global
   agentskills.io-compatible `~/.agents/skills` and the broader Claude-ecosystem
   `~/.claude/skills`. First launch installs versioned bundled skills for common
   workflows including skill creation, delegation, MCP/plugin scaffolding,
   documents, presentations, spreadsheets, PDFs, and Feishu/Lark.
-- `mcp_config_path` (string, optional): defaults to `~/.deepseek/mcp.json`.
+- `mcp_config_path` (string, optional): defaults to `~/.codewhale/mcp.json` with `~/.deepseek/mcp.json` fallback.
   It is visible in `/config` and can be changed from the TUI. The new path is
   used immediately by `/mcp`, but rebuilding the model-visible MCP tool pool
   requires restarting the TUI.
-- `notes_path` (string, optional): defaults to `~/.deepseek/notes.txt` and is used by the model-visible `note` tool.
+- `notes_path` (string, optional): defaults to `~/.codewhale/notes.txt` with `~/.deepseek/notes.txt` fallback and is used by the model-visible `note` tool.
 - `[memory].enabled` (bool, optional): defaults to `false`. When `true`,
   the TUI loads the user memory file into a `<user_memory>` prompt block,
   enables `# foo` quick-capture in the composer, surfaces the `/memory`
   slash command, and registers the `remember` tool. The same toggle is
   available via `DEEPSEEK_MEMORY=on`.
-- `memory_path` (string, optional): defaults to `~/.deepseek/memory.md`.
+- `memory_path` (string, optional): defaults to `~/.codewhale/memory.md` with `~/.deepseek/memory.md` fallback.
   Used by the user-memory feature when enabled — see
   [`MEMORY.md`](MEMORY.md) for the full feature surface (`# foo`
   composer prefix, `/memory` slash command, `remember` tool, opt-in
@@ -495,7 +503,7 @@ If you are upgrading from older releases:
 - `snapshots.*` (optional): side-git workspace snapshots for file rollback:
   - `[snapshots].enabled` (bool, default `true`)
   - `[snapshots].max_age_days` (int, default `7`)
-  - snapshots live under `~/.deepseek/snapshots/<project_hash>/<worktree_hash>/.git` and never use the workspace's own `.git` directory
+  - snapshots live under `~/.codewhale/snapshots/<project_hash>/<worktree_hash>/.git` (legacy `~/.deepseek/snapshots/...` is pruned/read during the rename window) and never use the workspace's own `.git` directory
 - `context.*` (optional): append-only Fin seam manager, currently opt-in.
   Fin is the fast `deepseek-v4-flash` path with thinking off used for
   coordination work such as routing, summaries, and context maintenance.
@@ -555,7 +563,7 @@ If you are upgrading from older releases:
 ### Workspace notes
 
 `/note` manages a simple notes file in the current workspace at
-`.deepseek/notes.md`. Existing `/note <text>` usage still appends a note.
+`.codewhale/notes.md` (legacy `.deepseek/notes.md` is still read when present). Existing `/note <text>` usage still appends a note.
 The management forms are:
 
 | Command | Action |
@@ -579,7 +587,7 @@ User memory is split across one top-level path setting and one opt-in
 toggle table:
 
 ```toml
-memory_path = "~/.deepseek/memory.md"
+memory_path = "~/.codewhale/memory.md"
 
 [memory]
 enabled = true
@@ -745,17 +753,17 @@ configure reasoning effort.
   MCP/skills/tools/plugins counts, sandbox, `.env` presence). Read-only and
   network-free; safe to run in CI. If `.env` is missing and `.env.example` is
   present in the workspace, the status output points at `cp .env.example .env`.
-- `--tools` — scaffold `~/.deepseek/tools/` with a `README.md` describing the
+- `--tools` — scaffold `~/.codewhale/tools/` with a `README.md` describing the
   self-describing frontmatter convention (`# name:` / `# description:` /
   `# usage:`) and an `example.sh` that follows it. The directory is
   intentionally not auto-loaded; wire individual scripts into the agent via
   MCP, hooks, or skills.
-- `--plugins` — scaffold `~/.deepseek/plugins/` with a `README.md` and an
+- `--plugins` — scaffold `~/.codewhale/plugins/` with a `README.md` and an
   `example/PLUGIN.md` placeholder using the same frontmatter shape as
   `SKILL.md`. Plugins are not loaded automatically either; reference them
   from a skill, hook, or MCP wrapper when you want them active.
 - `--all` now scaffolds MCP + skills + tools + plugins together.
-- `--clean` — list `~/.deepseek/sessions/checkpoints/latest.json` and
+- `--clean` — list `~/.codewhale/sessions/checkpoints/latest.json` and
   `offline_queue.json` if they exist. Pass `--force` to actually remove them.
   This never touches real session history or the task queue.
 

@@ -68,7 +68,7 @@ codewhale doctor --json
 | `mcp.present` | bool | Whether MCP config exists |
 | `mcp.servers` | array | Per-server health: `{name, enabled, status, detail}` |
 | `skills.selected` | string | Resolved skills directory |
-| `skills.global.path` / `.present` / `.count` | — | DeepSeek global skills dir (`~/.deepseek/skills`) |
+| `skills.global.path` / `.present` / `.count` | — | CodeWhale global skills dir (`~/.codewhale/skills`, with legacy `~/.deepseek/skills` fallback) |
 | `skills.agents.path` / `.present` / `.count` | — | Workspace `.agents/skills/` dir |
 | `skills.agents_global.path` / `.present` / `.count` | — | agentskills.io global skills dir (`~/.agents/skills`) |
 | `skills.local.path` / `.present` / `.count` | — | `skills/` dir |
@@ -335,7 +335,7 @@ when developing a UI on Vite's default `:5173`), use any of:
 
 - CLI flag (repeatable): `codewhale serve --http --cors-origin http://localhost:5173`
 - Env var (comma-separated): `DEEPSEEK_CORS_ORIGINS="http://localhost:5173,http://localhost:8080"`
-- Config (`~/.deepseek/config.toml`):
+- Config (`~/.codewhale/config.toml`):
   ```toml
   [runtime_api]
   cors_origins = ["http://localhost:5173"]

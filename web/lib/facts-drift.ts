@@ -84,10 +84,11 @@ function deriveProvidersFromConfig(cfg: string): ProviderFact[] {
     Openrouter: { id: "openrouter", label: "OpenRouter", env: "OPENROUTER_API_KEY" },
     Novita: { id: "novita", label: "Novita AI", env: "NOVITA_API_KEY" },
     Fireworks: { id: "fireworks", label: "Fireworks AI", env: "FIREWORKS_API_KEY" },
-    Moonshot: { id: "moonshot", label: "Moonshot/Kimi", env: "MOONSHOT_API_KEY / KIMI_API_KEY" },
+    Moonshot: { id: "moonshot", label: "Moonshot/Kimi (deprecated)", env: "MOONSHOT_API_KEY / KIMI_API_KEY" },
     Sglang: { id: "sglang", label: "SGLang", env: "SGLANG_API_KEY" },
     Vllm: { id: "vllm", label: "vLLM", env: "VLLM_API_KEY" },
     Ollama: { id: "ollama", label: "Ollama", env: "OLLAMA_API_KEY" },
+    Xiaomi: { id: "xiaomi", label: "Xiaomi MiMo", env: "MIMO_API_KEY" },
   };
   return variants.map((v) => labelMap[v]).filter(Boolean);
 }
