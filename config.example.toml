@@ -306,6 +306,16 @@ max_subagents = 10 # optional (1-20)
 # base_url = "https://api.siliconflow.com/v1"
 # model = "deepseek-ai/DeepSeek-V4-Pro"     # or deepseek-ai/DeepSeek-V4-Flash
 
+# Moonshot/Kimi OpenAI-compatible endpoint (https://platform.moonshot.ai)
+[providers.moonshot]
+# api_key = "YOUR_MOONSHOT_API_KEY"           # or KIMI_API_KEY
+# base_url = "https://api.moonshot.ai/v1"      # or KIMI_BASE_URL
+# model = "kimi-k2.6"
+# # Kimi Code path:
+# # base_url = "https://api.kimi.com/coding/v1"
+# # model = "kimi-for-coding"
+# # auth_mode = "kimi_oauth"                   # reads Kimi CLI OAuth credentials
+
 # Self-hosted SGLang OpenAI-compatible server
 [providers.sglang]
 # api_key = "OPTIONAL_SGLANG_TOKEN"
