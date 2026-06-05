@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   managed session. The endpoint preserves thread title/model/mode/workspace
   metadata, maps missing threads to 404, and returns 409 instead of snapshotting
   queued or active turns.
+- Added cost-estimate pricing for the Xiaomi MiMo primary chat models, which
+  were previously unpriced: `mimo-v2.5-pro` / `xiaomi/mimo-v2.5-pro` reuse the
+  DeepSeek V4-Pro rate table and `mimo-v2.5` / `xiaomi/mimo-v2.5` reuse the
+  DeepSeek V4-Flash rates. Existing DeepSeek pricing is unchanged (#2731, #2750).
 
 ### Changed
 
@@ -122,6 +126,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead of silently falling back to `custom`; runtime provider/model posture
   selection remains a follow-up (#2693, #2741).
 
+### Fixed
+
+- MCP tool routing now preserves server names that contain underscores.
+  `parse_prefixed_name` matches the qualified `mcp_<server>_<tool>` name against
+  the set of registered server names and prefers the longest match, so tools on
+  a server like `my_db` are reachable and an overlapping `my` / `my_db` pair
+  routes correctly. Falls back to the legacy first-underscore split when no
+  registered server matches (#2744).
+- Schema-hydrated deferred tools no longer render as a completed run. The first
+  use of a deferred tool returns a schema-hydration result instead of executing;
+  the transcript and sidebar now show "tool loaded — retry required" via a
+  dedicated hydrated status, so it is no longer indistinguishable from a real
+  successful execution. A hydrated row also ranks with active work rather than
+  completed successes (#2648).
+
 ### Community
 
 Thanks to **@cyq1017** for the restore-listing implementation (#2513) and
@@ -149,7 +168,12 @@ checkpoint/resume report that shaped the sub-agent recovery slice (#2029),
 review trail (#2508, #2506), **@NASLXTO** and **@wuxixing** for the
 large-workspace startup reports (#697, #1827), and **@linzhiqin2003** and
 **@merchloubna70-dot** for earlier context-cap and startup-diagnosis work that
-shaped this bounded fallback.
+shaped this bounded fallback. Thanks also to **@cyq1017** for the MCP
+underscore-server-name fix and Xiaomi MiMo pricing (#2747, #2744, #2750, #2731)
+and **@puneetdixit200** for independently diagnosing and fixing the same MCP
+underscore issue (#2746, #2744), **@mvanhorn** for the hydrated deferred-tool
+render fix (#2757, #2648), and **@xyuai** for the Xiaomi MiMo Token Plan region
+documentation (#2756, #2735).
 
 ## [0.8.53] - 2026-06-03
 

@@ -148,6 +148,13 @@ v0.9 branch so the remaining Windows/manual checks are explicit.
 | #2737 configured `skills_dir` discovery | Mergeable | Locally harvested with extra configured-before-global precedence tests. Comment/close original after the integration branch is public, crediting @h3c-hexin. |
 | #2738 dense tool-call transcript collapse | Mergeable / locally harvested | Harvested with normal rendering preserved, expansion wired through Enter/Space/mouse, compact default restored, full-detail index mapping preserved for Alt+V/copy-style paths, and revision keys mixed across hidden cells. Comment/close original after the integration branch is public, crediting @idling11 and issue #2692. |
 | #2740 dense tool-run collapse follow-up | Mergeable / superseded locally | Same #2692 lane as #2738. Reviewed PR head still had the common-case collapse and MCP grouping/name issues; local #2738 harvest already fixed those and added the focused tests. Comment/close after the integration branch is public, crediting @idling11. |
+| #2742 Ollama default model in completions | Mergeable / deferred | Real picker inconsistency (Ollama completion list returned hosted-only `OFFICIAL_DEEPSEEK_MODELS`), but the PR's fix pins the stale `deepseek-coder:1.3b` into another surface. Deferred per maintainer direction: do not entrench the V1-era local default; the live Ollama `/models` path (`client.rs`) already lists actually-installed models. Better fix is dynamic/current-model discovery. Keep #2742 open with a respectful comment; treat "should the Ollama default move off `deepseek-coder:1.3b`" as a separate maintainer decision. Credit @reidliu41. |
+| #2746 / #2747 MCP underscore server names | Mergeable / locally harvested | Two competing fixes for #2744. Harvested #2747 (@cyq1017) as `parse_prefixed_name` longest-registered-server match with first-underscore fallback, because it adds the overlapping `my`/`my_db` tie-break test; #2746 (@puneetdixit200) is the equivalent narrower fix and is superseded. `cargo test -p codewhale-tui --bin codewhale-tui --locked mcp_pool_call_tool` (3 pass). Comment/close both after the branch is public, crediting both contributors. Fixes #2744. |
+| #2750 Xiaomi MiMo pricing | Mergeable / locally harvested | Harvested: `mimo-v2.5-pro`/`xiaomi/mimo-v2.5-pro` reuse DeepSeek V4-Pro rates, `mimo-v2.5`/`xiaomi/mimo-v2.5` reuse V4-Flash rates, via extracted `deepseek_v4_pro_pricing()`/`deepseek_v4_flash_pricing()` helpers. DeepSeek pricing behavior unchanged. `cargo test -p codewhale-tui --bin codewhale-tui --locked pricing` (16 pass). Credit @cyq1017; comment/close after branch is public. Fixes #2731. |
+| #2751 merge workspace MCP config | Draft/mergeable / forwarded | Implements project-level MCP config merging (#2749) with path-normalization tests, but is a 365+/112- refactor across mcp.rs/main.rs/engine.rs/runtime_api.rs. Help-forward to maintainer review for MCP pool init ordering in runtime_api/doctor flows before harvest. Credit @cyq1017. |
+| #2755 roll back provider after auth failure | Draft / forwarded | Snapshot+rollback of provider/model on auth failure (#2754). Design is sound and tested, but author opened it as draft noting they could not reproduce the live Moonshot auth failure end-to-end. Help-forward: needs maintainer validation against a real provider auth failure (engine respawn + model restore). Credit @cyq1017. |
+| #2756 Xiaomi MiMo Token Plan region docs | Mergeable / locally harvested | Docs-only; verified accurate against branch `resolve_xiaomi_mimo_base_url` (tp- keys default to `token-plan-sgp`, pay-as-you-go to `api.xiaomimimo.com`, CN requires explicit `base_url`). Conflict on the CONFIGURATION.md provider bullet resolved by keeping the branch `path_suffix` bullet and adopting the PR's accurate base_url wording. Credit @xyuai; comment/close after branch is public. Fixes #2735. |
+| #2757 hydrated deferred-tool render | Mergeable / locally harvested | Harvested in full (6 files): deferred-tool first-use schema hydration now renders as "tool loaded — retry required" via `ToolStatus::Hydrated` instead of "run done". Local correction: hydrated rows rank with active work (rank 1) not completed successes; kept the contributor's hydration detection (sole emitter always sets `executed=false`, consistent with the engine's own check, so the missing-field default was not changed). `cargo test -p codewhale-tui --bin codewhale-tui --locked hydrat` (6 pass), clippy clean. Credit @mvanhorn; comment/close after branch is public. Fixes #2648. |
 
 ## Issue Reduction Strategy
 
@@ -168,7 +175,14 @@ Issue count should drop through evidence-backed consolidation, not bulk closing.
 ## Immediate Next Actions
 
 1. Prepare public comments for #2476, #2498, #2708, #2502, #2513, #2530,
-   #2576, #2581, #2627, #2634, #2636, #2639, #2687, #2736, #2737, #2738, and
-   already-harvested performance PRs.
-2. Start file decomposition Phase 1 only after the PR harvest table has no
+   #2576, #2581, #2627, #2634, #2636, #2639, #2687, #2736, #2737, #2738, #2746,
+   #2747, #2750, #2756, #2757, and already-harvested performance PRs.
+2. Help-forward #2751 (workspace MCP config merge) and #2755 (provider auth
+   rollback): maintainer review of MCP init ordering and a live provider
+   auth-failure smoke before harvest.
+3. Decide the Ollama default-model question raised on #2742: keep the V1-era
+   `deepseek-coder:1.3b` local default, or move it to a current small model the
+   completion picker and `default_model()` both reflect. Do not surface the old
+   model in additional pick-lists in the meantime.
+4. Start file decomposition Phase 1 only after the PR harvest table has no
    unknown high-priority provider/prompt/cache branches.
