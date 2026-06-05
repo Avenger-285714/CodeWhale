@@ -7,7 +7,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::fs;
-use std::path::{Component, Path};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -263,6 +263,9 @@ pub struct McpServerConfig {
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<PathBuf>,
     pub url: Option<String>,
     /// Optional explicit HTTP transport override.
     ///
@@ -1391,6 +1394,9 @@ impl McpConnection {
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
                 .kill_on_drop(true);
+            if let Some(cwd) = &config.cwd {
+                cmd.current_dir(cwd);
+            }
 
             // MCP stdio servers are user-configured integrations. Use the
             // wider MCP allowlist so common Node/Python/proxy/CA-bundle
@@ -1899,19 +1905,18 @@ pub struct McpPool {
     connections: HashMap<String, McpConnection>,
     config: McpConfig,
     network_policy: Option<NetworkPolicyDecider>,
-    /// Source path the config was loaded from, when `from_config_path` was
-    /// used. `None` for pools constructed directly via `new` (tests, ad-hoc
-    /// snapshots). Drives the lazy-reload check (#1267 part 2): when the
-    /// file's mtime moves, the pool re-reads the config and compares its
-    /// content hash to decide whether to drop existing connections.
-    config_source: Option<std::path::PathBuf>,
+    /// Source paths the config was loaded from. Empty for pools constructed
+    /// directly via `new` (tests, ad-hoc snapshots). Workspace-aware pools
+    /// track both global and project-level MCP config paths so lazy reload sees
+    /// either file appear or change.
+    config_sources: Vec<PathBuf>,
+    workspace: Option<PathBuf>,
     /// 64-bit content hash of the active config (`hash_mcp_config`). Compared
     /// against the freshly-loaded config after an mtime change to skip
     /// reloading when the file was merely touched.
     config_hash: u64,
-    /// Most recently observed mtime of `config_source`. Updated whenever the
-    /// reload check runs (whether or not it triggered a reload).
-    last_mtime: Option<std::time::SystemTime>,
+    /// Most recently observed mtime for `config_sources`.
+    last_mtimes: Vec<Option<std::time::SystemTime>>,
 }
 
 impl McpPool {
@@ -1922,27 +1927,41 @@ impl McpPool {
             connections: HashMap::new(),
             config,
             network_policy: None,
-            config_source: None,
+            config_sources: Vec::new(),
+            workspace: None,
             config_hash,
-            last_mtime: None,
+            last_mtimes: Vec::new(),
         }
     }
 
-    /// Create a pool from a configuration file path
+    /// Create a pool from a configuration file path.
+    #[cfg(test)]
     pub fn from_config_path(path: &std::path::Path) -> Result<Self> {
-        validate_mcp_config_path(path)?;
-        let config = if path.exists() {
-            let contents = fs::read_to_string(path)
-                .with_context(|| format!("Failed to read MCP config: {}", path.display()))?;
-            serde_json::from_str(&contents)
-                .with_context(|| format!("Failed to parse MCP config: {}", path.display()))?
-        } else {
-            McpConfig::default()
-        };
-        let last_mtime = mcp_config_mtime(path);
+        let config = load_config(path)?;
         let mut pool = Self::new(config);
-        pool.config_source = Some(path.to_path_buf());
-        pool.last_mtime = last_mtime;
+        pool.config_sources = vec![path.to_path_buf()];
+        pool.last_mtimes = vec![mcp_config_mtime(path)];
+        Ok(pool)
+    }
+
+    /// Create a pool from global MCP config plus workspace-local
+    /// `.codewhale/mcp.json`. Project servers override same-name global
+    /// servers and default stdio `cwd` to the workspace root.
+    pub fn from_config_path_with_workspace(
+        path: &std::path::Path,
+        workspace: &Path,
+    ) -> Result<Self> {
+        let config = load_config_with_workspace(path, workspace)?;
+        let mut pool = Self::new(config);
+        pool.config_sources = vec![path.to_path_buf(), workspace_mcp_config_path(workspace)];
+        pool.config_sources
+            .extend(crate::config::workspace_trust_config_candidate_paths());
+        pool.last_mtimes = pool
+            .config_sources
+            .iter()
+            .map(|source| mcp_config_mtime(source))
+            .collect();
+        pool.workspace = Some(workspace.to_path_buf());
         Ok(pool)
     }
 
@@ -1967,29 +1986,31 @@ impl McpPool {
     /// or remote filesystems where mtime granularity is poor, the hash
     /// compare keeps us from churning connections on every check.
     pub async fn reload_if_config_changed(&mut self) -> Result<bool> {
-        let Some(path) = self.config_source.clone() else {
+        if self.config_sources.is_empty() {
             return Ok(false);
-        };
-        let current_mtime = match mcp_config_mtime(&path) {
-            Some(m) => m,
-            None => return Ok(false),
-        };
-        if Some(current_mtime) == self.last_mtime {
+        }
+        let current_mtimes: Vec<_> = self
+            .config_sources
+            .iter()
+            .map(|path| mcp_config_mtime(path))
+            .collect();
+        if current_mtimes == self.last_mtimes {
             return Ok(false);
         }
         // mtime moved — we owe a re-read.
-        let new_config: McpConfig = if path.exists() {
-            let contents = fs::read_to_string(&path)
-                .with_context(|| format!("Failed to re-read MCP config: {}", path.display()))?;
-            serde_json::from_str(&contents)
-                .with_context(|| format!("Failed to re-parse MCP config: {}", path.display()))?
+        let primary = self
+            .config_sources
+            .first()
+            .context("MCP config source list unexpectedly empty")?;
+        let new_config = if let Some(workspace) = self.workspace.as_deref() {
+            load_config_with_workspace(primary, workspace)?
         } else {
-            McpConfig::default()
+            load_config(primary)?
         };
         let new_hash = hash_mcp_config(&new_config);
-        // Always advance last_mtime so a touched-but-unchanged file doesn't
+        // Always advance mtimes so a touched-but-unchanged file doesn't
         // make us re-read on every subsequent call.
-        self.last_mtime = Some(current_mtime);
+        self.last_mtimes = current_mtimes;
         if new_hash == self.config_hash {
             return Ok(false);
         }
@@ -2604,6 +2625,95 @@ pub fn load_config(path: &Path) -> Result<McpConfig> {
         .with_context(|| format!("Failed to parse MCP config {}", path.display()))
 }
 
+pub fn workspace_mcp_config_path(workspace: &Path) -> PathBuf {
+    normalize_workspace_path(workspace)
+        .join(".codewhale")
+        .join("mcp.json")
+}
+
+pub fn load_config_with_workspace(global_path: &Path, workspace: &Path) -> Result<McpConfig> {
+    let mut merged = load_config(global_path)?;
+    let workspace = normalize_workspace_path(workspace);
+    let project_path = workspace_mcp_config_path(&workspace);
+    if !project_path.exists() || paths_refer_to_same_config(global_path, &project_path) {
+        return Ok(merged);
+    }
+    // Workspace-local MCP can spawn stdio servers, so it is only honored after
+    // the user has trusted this workspace in user-owned config. Do not accept
+    // project-local legacy trust markers here: a repository could carry those
+    // files itself and silently reintroduce the project-scope `mcp_config_path`
+    // risk denied in #417.
+    if !workspace_allows_project_mcp_config(&workspace) {
+        return Ok(merged);
+    }
+
+    let mut project = load_config(&project_path)?;
+    for server in project.servers.values_mut() {
+        if server.command.is_some() && server.url.is_none() {
+            let cwd = match server.cwd.as_deref() {
+                Some(cwd) if cwd.is_relative() => normalize_path_components(&workspace.join(cwd)),
+                Some(cwd) => normalize_path_components(cwd),
+                None => workspace.to_path_buf(),
+            };
+            if !cwd.starts_with(&workspace) {
+                anyhow::bail!(
+                    "Project MCP server cwd must stay within workspace: {}",
+                    cwd.display()
+                );
+            }
+            server.cwd = Some(cwd);
+        }
+    }
+    merged.servers.extend(project.servers);
+    Ok(merged)
+}
+
+fn workspace_allows_project_mcp_config(workspace: &Path) -> bool {
+    crate::config::is_workspace_trusted(workspace)
+}
+
+fn normalize_workspace_path(workspace: &Path) -> PathBuf {
+    if let Ok(canonical) = workspace.canonicalize() {
+        return canonical;
+    }
+    let absolute = if workspace.is_absolute() {
+        workspace.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(workspace)
+    };
+    normalize_path_components(&absolute)
+}
+
+fn normalize_path_components(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(_) | Component::RootDir => {
+                normalized.push(component.as_os_str());
+            }
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        normalized
+    }
+}
+
+fn paths_refer_to_same_config(left: &Path, right: &Path) -> bool {
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => normalize_workspace_path(left) == normalize_workspace_path(right),
+    }
+}
+
 /// 64-bit content hash of an [`McpConfig`]. Used by [`McpPool`] to decide
 /// whether a freshly-read config differs from the one currently driving the
 /// live connections. Hashing the JSON serialization avoids forcing every
@@ -2654,6 +2764,7 @@ fn mcp_template_json() -> Result<String> {
             command: Some("node".to_string()),
             args: vec!["./path/to/your-mcp-server.js".to_string()],
             env: HashMap::new(),
+            cwd: None,
             url: None,
             transport: None,
             connect_timeout: None,
@@ -2709,6 +2820,7 @@ pub fn add_server_config(
             command,
             args,
             env: HashMap::new(),
+            cwd: None,
             url,
             transport,
             connect_timeout: None,
@@ -2952,6 +3064,56 @@ mod tests {
             .await
     }
 
+    struct WorkspaceTrustConfigGuard {
+        config_path: PathBuf,
+        _codewhale_config_path: crate::test_support::EnvVarGuard,
+        _deepseek_config_path: crate::test_support::EnvVarGuard,
+        _env_lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    fn workspace_trust_config_guard(workspace: &Path) -> WorkspaceTrustConfigGuard {
+        let env_lock = crate::test_support::lock_test_env();
+        let config_path = workspace
+            .parent()
+            .unwrap_or(workspace)
+            .join("user-config")
+            .join("config.toml");
+        if let Some(parent) = config_path.parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        let codewhale_config_path =
+            crate::test_support::EnvVarGuard::set("CODEWHALE_CONFIG_PATH", config_path.as_os_str());
+        let deepseek_config_path = crate::test_support::EnvVarGuard::remove("DEEPSEEK_CONFIG_PATH");
+
+        WorkspaceTrustConfigGuard {
+            config_path,
+            _codewhale_config_path: codewhale_config_path,
+            _deepseek_config_path: deepseek_config_path,
+            _env_lock: env_lock,
+        }
+    }
+
+    fn write_workspace_trust_config(config_path: &Path, workspace: &Path) {
+        let workspace = workspace
+            .canonicalize()
+            .unwrap_or_else(|_| workspace.to_path_buf());
+        let key = workspace
+            .to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"");
+        fs::write(
+            config_path,
+            format!("[projects.\"{key}\"]\ntrust_level = \"trusted\"\n"),
+        )
+        .unwrap();
+    }
+
+    fn mark_workspace_trusted(workspace: &Path) -> WorkspaceTrustConfigGuard {
+        let guard = workspace_trust_config_guard(workspace);
+        write_workspace_trust_config(&guard.config_path, workspace);
+        guard
+    }
+
     #[test]
     fn test_mcp_config_defaults() {
         let config = McpConfig::default();
@@ -3021,6 +3183,7 @@ mod tests {
             command: Some("node".into()),
             args: vec!["server.js".into()],
             env: HashMap::new(),
+            cwd: None,
             url: None,
             transport: None,
             connect_timeout: None,
@@ -3158,6 +3321,307 @@ mod tests {
     }
 
     #[test]
+    fn workspace_mcp_config_merges_with_project_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let _trust = mark_workspace_trusted(&workspace);
+        fs::write(
+            &global_path,
+            r#"{
+              "servers": {
+                "global": {"command": "node", "args": ["global.js"]},
+                "shared": {"command": "node", "args": ["global-shared.js"]}
+              }
+            }"#,
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{
+              "servers": {
+                "project": {"command": "php", "args": ["artisan", "boost:mcp"]},
+                "shared": {"command": "php", "args": ["artisan", "shared:mcp"]}
+              }
+            }"#,
+        )
+        .unwrap();
+
+        let cfg = load_config_with_workspace(&global_path, &workspace).unwrap();
+        let workspace = workspace.canonicalize().unwrap();
+
+        assert!(cfg.servers.contains_key("global"));
+        let project = cfg.servers.get("project").unwrap();
+        assert_eq!(project.command.as_deref(), Some("php"));
+        assert_eq!(project.cwd.as_deref(), Some(workspace.as_path()));
+        let shared = cfg.servers.get("shared").unwrap();
+        assert_eq!(shared.args, vec!["artisan", "shared:mcp"]);
+        assert_eq!(shared.cwd.as_deref(), Some(workspace.as_path()));
+    }
+
+    #[test]
+    fn workspace_mcp_config_ignores_project_file_until_workspace_trusted() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            &global_path,
+            r#"{"servers": {"global": {"command": "node", "args": ["global.js"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "php", "args": ["artisan", "boost:mcp"]}}}"#,
+        )
+        .unwrap();
+
+        let cfg = load_config_with_workspace(&global_path, &workspace).unwrap();
+
+        assert!(cfg.servers.contains_key("global"));
+        assert!(!cfg.servers.contains_key("project"));
+    }
+
+    #[test]
+    fn workspace_mcp_config_ignores_project_local_legacy_trust_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::create_dir_all(workspace.join(".deepseek")).unwrap();
+        fs::write(workspace.join(".deepseek").join("trusted"), "").unwrap();
+        fs::write(
+            &global_path,
+            r#"{"servers": {"global": {"command": "node", "args": ["global.js"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "php", "args": ["artisan", "boost:mcp"]}}}"#,
+        )
+        .unwrap();
+
+        let cfg = load_config_with_workspace(&global_path, &workspace).unwrap();
+
+        assert!(cfg.servers.contains_key("global"));
+        assert!(!cfg.servers.contains_key("project"));
+    }
+
+    #[test]
+    fn workspace_mcp_config_ignores_invalid_untrusted_project_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(&global_path, r#"{"servers": {}}"#).unwrap();
+        fs::write(project_dir.join("mcp.json"), "{ not json").unwrap();
+
+        let cfg = load_config_with_workspace(&global_path, &workspace).unwrap();
+
+        assert!(cfg.servers.is_empty());
+    }
+
+    #[test]
+    fn workspace_mcp_config_normalizes_parent_components() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let _trust = mark_workspace_trusted(&workspace);
+        fs::write(&global_path, r#"{"servers": {}}"#).unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "node", "args": ["server.js"]}}}"#,
+        )
+        .unwrap();
+
+        let workspace_with_parent = workspace.join("..").join("workspace");
+        let cfg = load_config_with_workspace(&global_path, &workspace_with_parent).unwrap();
+        let workspace = workspace.canonicalize().unwrap();
+
+        assert!(cfg.servers.contains_key("project"));
+        let project = cfg.servers.get("project").unwrap();
+        assert_eq!(project.cwd.as_deref(), Some(workspace.as_path()));
+    }
+
+    #[test]
+    fn workspace_mcp_config_resolves_relative_cwd_from_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let _trust = mark_workspace_trusted(&workspace);
+        fs::write(&global_path, r#"{"servers": {}}"#).unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "node", "args": ["server.js"], "cwd": "tools/mcp"}}}"#,
+        )
+        .unwrap();
+
+        let cfg = load_config_with_workspace(&global_path, &workspace).unwrap();
+        let workspace = workspace.canonicalize().unwrap();
+
+        let project = cfg.servers.get("project").unwrap();
+        assert_eq!(
+            project.cwd.as_deref(),
+            Some(workspace.join("tools/mcp").as_path())
+        );
+    }
+
+    #[test]
+    fn workspace_mcp_config_rejects_project_cwd_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let _trust = mark_workspace_trusted(&workspace);
+        fs::write(&global_path, r#"{"servers": {}}"#).unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "node", "args": ["server.js"], "cwd": "../outside"}}}"#,
+        )
+        .unwrap();
+
+        let err = load_config_with_workspace(&global_path, &workspace)
+            .expect_err("project MCP cwd escape must be rejected");
+
+        assert!(
+            err.to_string()
+                .contains("Project MCP server cwd must stay within workspace"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_mcp_pool_reload_picks_up_project_config_creation() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&workspace).unwrap();
+        let _trust = mark_workspace_trusted(&workspace);
+        fs::write(
+            &global_path,
+            r#"{"servers": {"global": {"command": "node", "args": ["global.js"]}}}"#,
+        )
+        .unwrap();
+
+        let mut pool = McpPool::from_config_path_with_workspace(&global_path, &workspace).unwrap();
+        assert_eq!(pool.server_names(), vec!["global"]);
+
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "php", "args": ["artisan", "boost:mcp"]}}}"#,
+        )
+        .unwrap();
+
+        assert!(pool.reload_if_config_changed().await.unwrap());
+        let names: std::collections::BTreeSet<_> = pool.server_names().into_iter().collect();
+        let expected: std::collections::BTreeSet<_> = ["global", "project"].into_iter().collect();
+        assert_eq!(names, expected);
+    }
+
+    #[tokio::test]
+    async fn workspace_mcp_pool_reload_picks_up_project_config_after_workspace_trust() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let trust_env = workspace_trust_config_guard(&workspace);
+        fs::write(
+            &global_path,
+            r#"{"servers": {"global": {"command": "node", "args": ["global.js"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "php", "args": ["artisan", "boost:mcp"]}}}"#,
+        )
+        .unwrap();
+
+        let mut pool = McpPool::from_config_path_with_workspace(&global_path, &workspace).unwrap();
+        assert_eq!(pool.server_names(), vec!["global"]);
+
+        write_workspace_trust_config(&trust_env.config_path, &workspace);
+
+        assert!(pool.reload_if_config_changed().await.unwrap());
+        let names: std::collections::BTreeSet<_> = pool.server_names().into_iter().collect();
+        let expected: std::collections::BTreeSet<_> = ["global", "project"].into_iter().collect();
+        assert_eq!(names, expected);
+    }
+
+    #[tokio::test]
+    async fn workspace_mcp_pool_reload_drops_project_config_after_workspace_trust_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let trust = mark_workspace_trusted(&workspace);
+        fs::write(
+            &global_path,
+            r#"{"servers": {"global": {"command": "node", "args": ["global.js"]}}}"#,
+        )
+        .unwrap();
+        fs::write(
+            project_dir.join("mcp.json"),
+            r#"{"servers": {"project": {"command": "php", "args": ["artisan", "boost:mcp"]}}}"#,
+        )
+        .unwrap();
+
+        let mut pool = McpPool::from_config_path_with_workspace(&global_path, &workspace).unwrap();
+        let names: std::collections::BTreeSet<_> = pool.server_names().into_iter().collect();
+        let expected: std::collections::BTreeSet<_> = ["global", "project"].into_iter().collect();
+        assert_eq!(names, expected);
+
+        fs::remove_file(&trust.config_path).unwrap();
+
+        assert!(pool.reload_if_config_changed().await.unwrap());
+        assert_eq!(pool.server_names(), vec!["global"]);
+    }
+
+    #[tokio::test]
+    async fn workspace_mcp_pool_reload_drops_project_config_after_deletion() {
+        let dir = tempfile::tempdir().unwrap();
+        let global_path = dir.path().join("global-mcp.json");
+        let workspace = dir.path().join("workspace");
+        let project_dir = workspace.join(".codewhale");
+        fs::create_dir_all(&project_dir).unwrap();
+        let _trust = mark_workspace_trusted(&workspace);
+        fs::write(
+            &global_path,
+            r#"{"servers": {"global": {"command": "node", "args": ["global.js"]}}}"#,
+        )
+        .unwrap();
+        let project_path = project_dir.join("mcp.json");
+        fs::write(
+            &project_path,
+            r#"{"servers": {"project": {"command": "php", "args": ["artisan", "boost:mcp"]}}}"#,
+        )
+        .unwrap();
+
+        let mut pool = McpPool::from_config_path_with_workspace(&global_path, &workspace).unwrap();
+        let names: std::collections::BTreeSet<_> = pool.server_names().into_iter().collect();
+        let expected: std::collections::BTreeSet<_> = ["global", "project"].into_iter().collect();
+        assert_eq!(names, expected);
+
+        fs::remove_file(project_path).unwrap();
+
+        assert!(pool.reload_if_config_changed().await.unwrap());
+        assert_eq!(pool.server_names(), vec!["global"]);
+    }
+
+    #[test]
     fn test_mcp_config_rejects_traversal_path() {
         let err = load_config(Path::new("../mcp.json")).expect_err("traversal path should fail");
         assert!(
@@ -3257,6 +3721,7 @@ mod tests {
             command: Some("test".to_string()),
             args: vec![],
             env: HashMap::new(),
+            cwd: None,
             url: None,
             transport: None,
             connect_timeout: Some(20),
@@ -3368,6 +3833,7 @@ mod tests {
             command: Some("mock".to_string()),
             args: Vec::new(),
             env: HashMap::new(),
+            cwd: None,
             url: None,
             transport: None,
             connect_timeout: None,
@@ -3557,6 +4023,7 @@ mod tests {
                 command: Some("/bin/echo".into()),
                 args: vec!["hi".into()],
                 env: Default::default(),
+                cwd: None,
                 url: None,
                 transport: None,
                 connect_timeout: None,
@@ -4081,6 +4548,7 @@ mod tests {
             command: None,
             args: vec![],
             env: HashMap::new(),
+            cwd: None,
             url: Some(format!("http://{addr}/mcp")),
             transport: None,
             connect_timeout: Some(2),
@@ -4829,6 +5297,7 @@ mod tests {
                 command: None,
                 args: Vec::new(),
                 env: HashMap::new(),
+                cwd: None,
                 url: Some(format!("http://{addr}/mcp")),
                 transport: None,
                 connect_timeout: Some(10),
@@ -5100,6 +5569,7 @@ mod tests {
                 command: None,
                 args: Vec::new(),
                 env: HashMap::new(),
+                cwd: None,
                 url: Some(format!("http://{addr}/sse")),
                 transport: Some("sse".to_string()),
                 connect_timeout: Some(10),
