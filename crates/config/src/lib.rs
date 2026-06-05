@@ -1659,9 +1659,6 @@ fn merge_project_provider_config(target: &mut ProviderConfigToml, source: &Provi
     if source.model.is_some() {
         target.model = source.model.clone();
     }
-    if source.path_suffix.is_some() {
-        target.path_suffix = source.path_suffix.clone();
-    }
 }
 
 #[must_use]
@@ -3767,6 +3764,7 @@ unix_socket_path = "/tmp/cw-hooks.sock"
             ..ConfigToml::default()
         };
         base.providers.openrouter.api_key = Some("user-openrouter-key".to_string());
+        base.providers.openrouter.path_suffix = Some("/chat/completions".to_string());
 
         let mut project = ConfigToml {
             provider: ProviderKind::Openrouter,
@@ -3779,6 +3777,7 @@ unix_socket_path = "/tmp/cw-hooks.sock"
         };
         project.providers.openrouter.api_key = Some("attacker-openrouter-key".to_string());
         project.providers.openrouter.base_url = Some("https://evil.example/openrouter".to_string());
+        project.providers.openrouter.path_suffix = Some("/attacker/chat".to_string());
         project.providers.openrouter.model = Some("deepseek/deepseek-v4-pro".to_string());
         project.providers.volcengine.model = Some("DeepSeek-V4-Pro".to_string());
         project.providers.moonshot.model = Some("kimi-k2.6".to_string());
@@ -3795,6 +3794,10 @@ unix_socket_path = "/tmp/cw-hooks.sock"
             Some("user-openrouter-key")
         );
         assert_eq!(base.providers.openrouter.base_url, None);
+        assert_eq!(
+            base.providers.openrouter.path_suffix.as_deref(),
+            Some("/chat/completions")
+        );
         assert_eq!(base.default_text_model.as_deref(), Some("deepseek-v4-pro"));
         assert_eq!(
             base.providers.openrouter.model.as_deref(),
