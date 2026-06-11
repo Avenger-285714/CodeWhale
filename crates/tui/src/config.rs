@@ -10756,14 +10756,30 @@ model = "deepseek-ai/deepseek-v4-pro"
     }
 
     #[test]
-    fn provider_capability_atlascloud_custom_model_is_chat_completions_without_thinking() {
+    fn provider_capability_atlascloud_v4_model_resolves_model_metadata() {
+        // #3023: Atlascloud uses the generic model-based path, so its default
+        // DeepSeek V4 model resolves the real V4 metadata instead of the old
+        // hardcoded legacy floor.
         let cap = provider_capability(ApiProvider::Atlascloud, "deepseek-ai/deepseek-v4-flash");
         assert_eq!(
             cap.context_window,
-            crate::models::LEGACY_DEEPSEEK_CONTEXT_WINDOW_TOKENS
+            crate::models::DEEPSEEK_V4_CONTEXT_WINDOW_TOKENS
         );
-        assert_eq!(cap.max_output, 4096);
-        assert!(!cap.thinking_supported);
+        assert_eq!(cap.max_output, 384_000);
+        assert!(cap.thinking_supported);
+        assert!(!cap.cache_telemetry_supported);
+        assert_eq!(
+            cap.request_payload_mode,
+            RequestPayloadMode::ChatCompletions
+        );
+    }
+
+    #[test]
+    fn provider_capability_moonshot_default_model_resolves_kimi_metadata() {
+        let cap = provider_capability(ApiProvider::Moonshot, DEFAULT_MOONSHOT_MODEL);
+        assert_eq!(cap.context_window, 262_144);
+        assert_eq!(cap.max_output, 262_144);
+        assert!(cap.thinking_supported);
         assert!(!cap.cache_telemetry_supported);
         assert_eq!(
             cap.request_payload_mode,
@@ -10788,8 +10804,26 @@ model = "deepseek-ai/deepseek-v4-pro"
     }
 
     #[test]
-    fn provider_capability_ollama_is_openai_compatible_without_thinking() {
+    fn provider_capability_ollama_deepseek_tag_uses_deepseek_heuristic() {
+        // #3023: known model families resolve through models.rs lookups even
+        // on Ollama — a legacy DeepSeek tag gets the 128K heuristic window.
         let cap = provider_capability(ApiProvider::Ollama, "deepseek-v3.1:671b");
+        assert_eq!(
+            cap.context_window,
+            crate::models::LEGACY_DEEPSEEK_CONTEXT_WINDOW_TOKENS
+        );
+        assert_eq!(cap.max_output, 4096);
+        assert!(!cap.thinking_supported);
+        assert!(!cap.cache_telemetry_supported);
+        assert_eq!(
+            cap.request_payload_mode,
+            RequestPayloadMode::ChatCompletions
+        );
+    }
+
+    #[test]
+    fn provider_capability_ollama_unknown_model_falls_back_to_8192() {
+        let cap = provider_capability(ApiProvider::Ollama, "llama3.2:3b");
         assert_eq!(cap.context_window, 8192);
         assert_eq!(cap.max_output, 4096);
         assert!(!cap.thinking_supported);
