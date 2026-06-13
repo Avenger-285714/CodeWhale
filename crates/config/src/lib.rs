@@ -659,6 +659,10 @@ pub struct ConfigToml {
     /// lifecycle `[hooks]` table so config rewrites preserve existing hooks.
     #[serde(default)]
     pub hook_sinks: Option<HookSinksToml>,
+    /// Agent Fleet trust and security policy (#3165). When absent, fleet
+    /// workers inherit conservative Sandbox defaults.
+    #[serde(default)]
+    pub fleet: Option<FleetConfigToml>,
     #[serde(flatten)]
     pub extras: BTreeMap<String, toml::Value>,
 }
@@ -1053,6 +1057,236 @@ impl Default for SnapshotsToml {
             max_age_days: default_snapshot_max_age_days(),
         }
     }
+}
+
+/// On-disk schema for the `[fleet]` table (#3165). See `config.example.toml`
+/// and `docs/FLEET.md` for documentation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetConfigToml {
+    /// Default trust level for fleet workers. One of `"sandbox"`, `"local"`,
+    /// `"remote-verified"`, or `"operator"`. Defaults to `"sandbox"`.
+    #[serde(default = "default_fleet_trust_level_str")]
+    pub default_trust_level: String,
+    /// Require identity verification for remote (SSH) workers before
+    /// granting them `remote-verified` trust. Defaults to true.
+    #[serde(default = "default_fleet_require_identity")]
+    pub require_identity_verification: bool,
+    /// Maximum trust level any worker may have (`"sandbox"`, `"local"`,
+    /// `"remote-verified"`, or `"operator"`). Defaults to `"operator"`.
+    #[serde(default = "default_fleet_max_trust_level_str")]
+    pub max_trust_level: String,
+    /// User-defined and built-in role presets.
+    ///
+    /// Each role defines default tool profiles, capabilities, budgets, and
+    /// trust settings that task specs can reference by name. Built-in roles
+    /// (`smoke-runner`, `reviewer`, `builder`, `read-only`) are always
+    /// available; user-defined roles in config override or extend them.
+    #[serde(default)]
+    pub roles: BTreeMap<String, FleetRolePreset>,
+    /// Headless worker execution hardening (#3027).
+    #[serde(default)]
+    pub exec: FleetExecConfig,
+}
+
+/// Canonical recursion-depth policy for the headless worker runtime.
+///
+/// Single source of truth shared by BOTH standalone sub-agents and fleet
+/// workers so the two cannot drift into "two moving targets":
+/// - [`DEFAULT_SPAWN_DEPTH`] is the default recursion budget (the sub-agent
+///   runtime's `DEFAULT_MAX_SPAWN_DEPTH` is defined as this value).
+/// - [`MAX_SPAWN_DEPTH_CEILING`] is the hard safety cap; every configured
+///   value (fleet `max_spawn_depth`, `agent_open`'s `max_depth`) clamps to it.
+///
+/// A worker runs at `spawn_depth = 0` and may spawn while
+/// `spawn_depth + 1 <= max_spawn_depth`, so a depth of N affords N nested
+/// delegation levels below the root worker. The default of 3 affords at least
+/// three recursion levels out of the box; the root worker still runs at
+/// depth 0 even when the budget is 0.
+pub const DEFAULT_SPAWN_DEPTH: u32 = 3;
+
+/// Hard ceiling on recursion depth for any worker/sub-agent. See
+/// [`DEFAULT_SPAWN_DEPTH`]. Raising this single constant lifts the limit
+/// everywhere (the fleet clamp and `agent_open` validation both read it).
+pub const MAX_SPAWN_DEPTH_CEILING: u32 = 3;
+
+/// Headless worker execution constraints (#3027).
+///
+/// These limits apply to all fleet workers and sub-agents spawned through
+/// the headless worker runtime. Task specs can tighten but not loosen them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetExecConfig {
+    /// Tools that are always allowed regardless of role or task spec.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_tools: Vec<String>,
+    /// Tools that are always disallowed, overriding role and task spec.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub disallowed_tools: Vec<String>,
+    /// Hard ceiling on sub-agent steps (tool calls + model turns).
+    /// Workers that exceed this are terminated. Default: unbounded (u32::MAX).
+    #[serde(default = "default_fleet_max_turns")]
+    pub max_turns: u32,
+    /// Recursive child-agent budget for headless fleet workers.
+    /// Defaults to [`DEFAULT_SPAWN_DEPTH`] (3) so a fleet worker has the SAME
+    /// recursion budget as a standalone sub-agent — fleet and sub-agents are one
+    /// substrate, not two. Set 0 to block child `agent_open` (the root worker
+    /// still runs); the value is clamped to [`MAX_SPAWN_DEPTH_CEILING`].
+    #[serde(default = "default_fleet_max_spawn_depth")]
+    pub max_spawn_depth: u32,
+    /// Extra system prompt text appended to every headless worker.
+    /// Useful for injecting org-wide policy or behavior constraints.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub append_system_prompt: String,
+    /// Output format for fleet worker results.
+    /// `"text"` (default) or `"stream-json"` for newline-delimited JSON events.
+    #[serde(default = "default_fleet_output_format")]
+    pub output_format: String,
+}
+
+fn default_fleet_max_turns() -> u32 {
+    u32::MAX
+}
+
+fn default_fleet_max_spawn_depth() -> u32 {
+    DEFAULT_SPAWN_DEPTH
+}
+
+fn default_fleet_output_format() -> String {
+    "text".to_string()
+}
+
+impl Default for FleetExecConfig {
+    fn default() -> Self {
+        Self {
+            allowed_tools: Vec::new(),
+            disallowed_tools: Vec::new(),
+            max_turns: default_fleet_max_turns(),
+            max_spawn_depth: default_fleet_max_spawn_depth(),
+            append_system_prompt: String::new(),
+            output_format: default_fleet_output_format(),
+        }
+    }
+}
+
+/// A named role preset that bundles common worker settings.
+///
+/// Task specs reference a role name (e.g. `"role": "reviewer"`), and the
+/// fleet manager fills in any missing fields from the preset. User-defined
+/// roles in `[fleet.roles]` override built-in defaults with the same name.
+///
+/// Token budgets and tool-call limits are task-level decisions — they don't
+/// belong on role presets. Use `timeout_seconds` as the safety bound.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FleetRolePreset {
+    /// Short description of what this role is for.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Default tool profile (`"read-only"`, `"read-write"`, or `"custom"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_profile: Option<String>,
+    /// Default set of tool names available to this role.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<String>,
+    /// Default capability tags (e.g. `"rust"`, `"git"`, `"gh"`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<String>,
+    /// Default timeout in seconds for tasks using this role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timeout_seconds: Option<u64>,
+    /// Default trust level override for this role.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_level: Option<String>,
+}
+
+fn default_fleet_trust_level_str() -> String {
+    "sandbox".to_string()
+}
+
+fn default_fleet_require_identity() -> bool {
+    true
+}
+
+fn default_fleet_max_trust_level_str() -> String {
+    "operator".to_string()
+}
+
+impl Default for FleetConfigToml {
+    fn default() -> Self {
+        Self {
+            default_trust_level: default_fleet_trust_level_str(),
+            require_identity_verification: default_fleet_require_identity(),
+            max_trust_level: default_fleet_max_trust_level_str(),
+            roles: BTreeMap::new(),
+            exec: FleetExecConfig::default(),
+        }
+    }
+}
+
+impl FleetConfigToml {
+    /// Resolve a role preset by name. Checks user-defined roles first,
+    /// then falls back to built-in role defaults.
+    #[must_use]
+    pub fn resolve_role(&self, name: &str) -> Option<FleetRolePreset> {
+        self.roles
+            .get(name)
+            .cloned()
+            .or_else(|| built_in_role_presets().get(name).cloned())
+    }
+}
+
+/// Built-in role presets that are always available without config.
+#[must_use]
+pub fn built_in_role_presets() -> BTreeMap<String, FleetRolePreset> {
+    [
+        (
+            "smoke-runner".to_string(),
+            FleetRolePreset {
+                description: Some("Lightweight read-only smoke check worker".to_string()),
+                tool_profile: Some("read-only".to_string()),
+                tools: vec![],
+                capabilities: vec![],
+                timeout_seconds: Some(300),
+                trust_level: Some("local".to_string()),
+            },
+        ),
+        (
+            "reviewer".to_string(),
+            FleetRolePreset {
+                description: Some("Read-only code and documentation review".to_string()),
+                tool_profile: Some("read-only".to_string()),
+                tools: vec![],
+                capabilities: vec![],
+                timeout_seconds: Some(600),
+                trust_level: None,
+            },
+        ),
+        (
+            "builder".to_string(),
+            FleetRolePreset {
+                description: Some(
+                    "Read-write builder with compilation and test access".to_string(),
+                ),
+                tool_profile: Some("read-write".to_string()),
+                tools: vec![],
+                capabilities: vec![],
+                timeout_seconds: Some(1800),
+                trust_level: Some("local".to_string()),
+            },
+        ),
+        (
+            "read-only".to_string(),
+            FleetRolePreset {
+                description: Some(
+                    "Minimal read-only observer with no writes or secrets".to_string(),
+                ),
+                tool_profile: Some("read-only".to_string()),
+                tools: vec![],
+                capabilities: vec![],
+                timeout_seconds: Some(300),
+                trust_level: Some("sandbox".to_string()),
+            },
+        ),
+    ]
+    .into()
 }
 
 /// On-disk schema for the `[network]` table (#135). See `config.example.toml`
@@ -7126,6 +7360,32 @@ fallback_providers = ["deepseek", "openrouter"]
         let serialized = toml::to_string_pretty(&ConfigToml::default()).expect("config serializes");
 
         assert!(!serialized.contains("fallback_providers"));
+    }
+
+    #[test]
+    fn fleet_exec_config_default_matches_subagent_spawn_depth() {
+        // Fleet workers and standalone sub-agents share one recursion axis:
+        // the fleet default equals DEFAULT_SPAWN_DEPTH (3) and affords >=3
+        // nested delegation levels out of the box.
+        assert_eq!(
+            FleetExecConfig::default().max_spawn_depth,
+            DEFAULT_SPAWN_DEPTH
+        );
+        assert_eq!(FleetExecConfig::default().max_spawn_depth, 3);
+        assert!(DEFAULT_SPAWN_DEPTH <= MAX_SPAWN_DEPTH_CEILING);
+    }
+
+    #[test]
+    fn fleet_exec_config_parses_max_spawn_depth() {
+        let config: ConfigToml = toml::from_str(
+            r#"
+[fleet.exec]
+max_spawn_depth = 2
+"#,
+        )
+        .expect("fleet exec config should parse");
+
+        assert_eq!(config.fleet.expect("fleet config").exec.max_spawn_depth, 2);
     }
 
     #[test]

@@ -23,6 +23,9 @@ pub struct FleetTaskSpecDocument {
     pub name: Option<String>,
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub security_policy: Option<FleetSecurityPolicy>,
     #[serde(default, alias = "worker_specs")]
     pub workers: Vec<FleetWorkerSpec>,
     #[serde(default)]
@@ -49,12 +52,14 @@ impl FleetTaskSpecFile {
             Self::Tasks(tasks) => FleetTaskSpecDocument {
                 name: Some(fallback_name),
                 labels: BTreeMap::new(),
+                security_policy: None,
                 workers: Vec::new(),
                 tasks,
             },
             Self::Single(task) => FleetTaskSpecDocument {
                 name: Some(fallback_name),
                 labels: BTreeMap::new(),
+                security_policy: None,
                 workers: Vec::new(),
                 tasks: vec![task],
             },

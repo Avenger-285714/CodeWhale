@@ -21,14 +21,38 @@ use super::task_spec::{
     FleetTaskSpecDocument, FleetTaskVerificationInput, load_task_spec_document,
     record_verification_receipt, validate_task_spec_document, verify_task_result,
 };
+use super::worker_runtime;
+use crate::tools::subagent::SharedSubAgentManager;
 
 const DEFAULT_STALE_AFTER_SECONDS: u64 = 300;
 
-#[derive(Debug)]
 pub struct FleetManager {
     workspace: PathBuf,
     ledger: FleetLedger,
     stale_after: Duration,
+    exec_config: codewhale_config::FleetExecConfig,
+    /// Optional sub-agent manager for headless worker execution.
+    /// When set, fleet workers spawn real sub-agents; when None,
+    /// the manager falls back to local simulation.
+    sub_agent_manager: Option<SharedSubAgentManager>,
+}
+
+impl std::fmt::Debug for FleetManager {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FleetManager")
+            .field("workspace", &self.workspace)
+            .field("ledger", &self.ledger)
+            .field("stale_after", &self.stale_after)
+            .field("exec_config", &self.exec_config)
+            .field(
+                "sub_agent_manager",
+                &self
+                    .sub_agent_manager
+                    .as_ref()
+                    .map(|_| "SharedSubAgentManager"),
+            )
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +102,28 @@ pub struct FleetWorkerInspection {
     pub artifacts: Vec<FleetArtifactRef>,
     pub last_error: Option<String>,
     pub alert_state: Option<String>,
+    /// Lightweight projection from the sub-agent worker runtime.
+    /// Populated when a sub-agent manager is attached.
+    pub runtime_state: Option<FleetWorkerRuntimeProjection>,
+}
+
+/// Lightweight TUI projection of a headless sub-agent worker's current state.
+///
+/// Derived from the sub-agent manager's `AgentWorkerRecord`.
+#[derive(Debug, Clone)]
+pub struct FleetWorkerRuntimeProjection {
+    /// Sub-agent lifecycle status (Queued, Starting, Running, Completed, etc.)
+    pub agent_status: String,
+    /// Steps taken so far (tool calls + model turns)
+    pub steps_taken: u32,
+    /// Latest human-readable message from the worker
+    pub latest_message: Option<String>,
+    /// Error message if the worker failed
+    pub error: Option<String>,
+    /// Result summary if the worker completed
+    pub result_summary: Option<String>,
+    /// Whether the worker has a sub-agent session running
+    pub has_session: bool,
 }
 
 impl FleetManager {
@@ -88,12 +134,31 @@ impl FleetManager {
             workspace,
             ledger,
             stale_after: Duration::from_secs(DEFAULT_STALE_AFTER_SECONDS),
+            exec_config: codewhale_config::FleetExecConfig::default(),
+            sub_agent_manager: None,
         })
     }
 
     pub fn with_stale_after(mut self, stale_after: Duration) -> Self {
         self.stale_after = stale_after;
         self
+    }
+
+    /// Apply fleet headless-worker execution policy from config.
+    pub fn with_exec_config(mut self, exec_config: codewhale_config::FleetExecConfig) -> Self {
+        self.exec_config = exec_config;
+        self
+    }
+
+    /// Attach a sub-agent manager so fleet workers can spawn real headless agents.
+    pub fn with_sub_agent_manager(mut self, mgr: SharedSubAgentManager) -> Self {
+        self.sub_agent_manager = Some(mgr);
+        self
+    }
+
+    /// True when the manager has a sub-agent runtime for headless worker execution.
+    pub fn has_worker_runtime(&self) -> bool {
+        self.sub_agent_manager.is_some()
     }
 
     pub fn ledger_path(&self) -> &Path {
@@ -139,6 +204,7 @@ impl FleetManager {
             task_specs: doc.tasks.clone(),
             worker_specs: doc.workers.clone(),
             labels: doc.labels,
+            security_policy: doc.security_policy.clone(),
             created_at: now.clone(),
             updated_at: Some(now.clone()),
             completed_at: None,
@@ -280,6 +346,27 @@ impl FleetManager {
             .get(worker_id)
             .map(|heartbeat| heartbeat.timestamp.clone());
         let alert_state = latest_alert_for_worker(&state, worker_id);
+
+        // Enrich with sub-agent worker runtime state when available.
+        let runtime_state = self.sub_agent_manager.as_ref().and_then(|mgr| {
+            mgr.try_read()
+                .ok()
+                .and_then(|guard| guard.get_worker_record(worker_id))
+                .map(|record| FleetWorkerRuntimeProjection {
+                    agent_status: format!("{:?}", record.status).to_lowercase(),
+                    steps_taken: record.steps_taken,
+                    latest_message: record.latest_message,
+                    error: record.error,
+                    result_summary: record.result_summary,
+                    has_session: !matches!(
+                        record.status,
+                        crate::tools::subagent::AgentWorkerStatus::Completed
+                            | crate::tools::subagent::AgentWorkerStatus::Failed
+                            | crate::tools::subagent::AgentWorkerStatus::Cancelled
+                    ),
+                })
+        });
+
         Ok(FleetWorkerInspection {
             worker_id: worker_id.to_string(),
             status,
@@ -293,6 +380,7 @@ impl FleetManager {
             artifacts,
             last_error,
             alert_state,
+            runtime_state,
         })
     }
 
@@ -475,6 +563,45 @@ impl FleetManager {
             FleetWorkerEventPayload::Running,
         )?;
         self.ledger.heartbeat(worker_id, &timestamp(), None, None)?;
+
+        // Register with the sub-agent manager for headless worker tracking.
+        // The engine's agent_open path handles actual sub-agent spawning.
+        if let Some(ref mgr) = self.sub_agent_manager {
+            if let Ok(guard) = mgr.try_write() {
+                let run = self
+                    .ledger
+                    .rebuild_state()
+                    .ok()
+                    .and_then(|state| state.runs.get(&entry.run_id.0).cloned());
+                let worker_spec = run
+                    .as_ref()
+                    .and_then(|r| r.worker_specs.iter().find(|w| w.id == worker_id).cloned())
+                    .unwrap_or_else(|| FleetWorkerSpec {
+                        id: worker_id.to_string(),
+                        name: worker_id.to_string(),
+                        host: FleetHostSpec::Local,
+                        trust_level: Some(FleetTrustLevel::Local),
+                        labels: BTreeMap::new(),
+                        capabilities: vec![],
+                        max_concurrent_tasks: Some(1),
+                    });
+                let worker = worker_runtime::fleet_task_to_worker_spec(
+                    worker_id,
+                    &entry.run_id.0,
+                    task_spec,
+                    &worker_spec,
+                    "auto",
+                    &self.workspace,
+                );
+                let worker = worker_runtime::apply_exec_hardening(worker, &self.exec_config);
+                // drop guard after registering so we don't hold the write lock
+                drop(guard);
+                if let Ok(mut guard) = mgr.try_write() {
+                    guard.register_worker(worker);
+                }
+            }
+        }
+
         self.maybe_complete_local_simulation(entry, worker_id, task_spec, log_artifact)
     }
 
@@ -746,6 +873,7 @@ fn default_local_workers(run_id: &FleetRunId, max_workers: usize) -> Vec<FleetWo
             id: format!("{}-local-{}", run_id.0, index),
             name: format!("Local worker {index}"),
             host: FleetHostSpec::Local,
+            trust_level: Some(FleetTrustLevel::Local),
             labels: BTreeMap::new(),
             capabilities: vec!["local".to_string()],
             max_concurrent_tasks: Some(1),
@@ -1266,5 +1394,160 @@ mod tests {
             inspection.alert_state.as_deref(),
             Some("escalated via pagerduty alert_id=alert-1")
         );
+    }
+
+    #[test]
+    fn fleet_dogfood_smoke_run_two_local_workers_two_tasks() {
+        let tmp = TempDir::new().unwrap();
+        let workspace = tmp.path().join("repo");
+        std::fs::create_dir_all(&workspace).unwrap();
+        // Create a minimal Cargo.toml so the cargo-check task can succeed.
+        std::fs::write(
+            workspace.join("Cargo.toml"),
+            "[package]\nname = \"smoke\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(workspace.join("src")).unwrap();
+        std::fs::write(
+            workspace.join("src").join("lib.rs"),
+            "pub fn answer() -> u8 { 42 }\n",
+        )
+        .unwrap();
+
+        let tasks = vec![
+            FleetTaskSpec {
+                id: "check".to_string(),
+                name: "check".to_string(),
+                description: None,
+                objective: Some("cargo check".to_string()),
+                instructions: "run cargo check and report result".to_string(),
+                worker: Some(FleetTaskWorkerProfile {
+                    role: Some("release-checker".to_string()),
+                    tool_profile: Some("read-only".to_string()),
+                    tools: vec!["cargo".to_string()],
+                    capabilities: vec!["rust".to_string()],
+                }),
+                workspace: Some(FleetWorkspaceRequirements {
+                    root: None,
+                    required_files: vec![PathBuf::from("Cargo.toml")],
+                    writable_paths: vec![PathBuf::from(".codewhale/fleet")],
+                    environment: Some(FleetEnvironmentRequirements {
+                        required: vec!["PATH".to_string()],
+                        allowlist: vec![],
+                    }),
+                }),
+                input_files: vec![],
+                context: vec![],
+                budget: None,
+                tags: vec!["smoke".to_string()],
+                expected_artifacts: vec![FleetArtifactKind::Log, FleetArtifactKind::Receipt],
+                scorer: Some(FleetScorerSpec::ExitCode),
+                retry_policy: Some(FleetRetryPolicy {
+                    max_attempts: 1,
+                    ..Default::default()
+                }),
+                alert_policy: None,
+                timeout_seconds: Some(60),
+                metadata: BTreeMap::new(),
+            },
+            FleetTaskSpec {
+                id: "review".to_string(),
+                name: "review".to_string(),
+                description: None,
+                objective: Some("review source".to_string()),
+                instructions: "read src/lib.rs and report findings".to_string(),
+                worker: Some(FleetTaskWorkerProfile {
+                    role: Some("reviewer".to_string()),
+                    tool_profile: Some("read-only".to_string()),
+                    tools: vec!["cargo".to_string()],
+                    capabilities: vec!["rust".to_string()],
+                }),
+                workspace: Some(FleetWorkspaceRequirements {
+                    root: None,
+                    required_files: vec![],
+                    writable_paths: vec![],
+                    environment: Some(FleetEnvironmentRequirements {
+                        required: vec!["PATH".to_string()],
+                        allowlist: vec![],
+                    }),
+                }),
+                input_files: vec![],
+                context: vec![],
+                budget: None,
+                tags: vec!["smoke".to_string()],
+                expected_artifacts: vec![FleetArtifactKind::Log, FleetArtifactKind::Receipt],
+                scorer: None,
+                retry_policy: Some(FleetRetryPolicy {
+                    max_attempts: 1,
+                    ..Default::default()
+                }),
+                alert_policy: None,
+                timeout_seconds: Some(60),
+                metadata: BTreeMap::new(),
+            },
+        ];
+
+        let manager = FleetManager::open(&workspace).unwrap();
+        let report = manager
+            .create_run(
+                FleetTaskSpecDocument {
+                    name: Some("dogfood smoke".to_string()),
+                    labels: BTreeMap::new(),
+                    security_policy: Some(FleetSecurityPolicy {
+                        default_trust_level: FleetTrustLevel::Local,
+                        ..Default::default()
+                    }),
+                    workers: vec![],
+                    tasks,
+                },
+                2,
+            )
+            .unwrap();
+
+        assert_eq!(report.task_count, 2);
+        assert!(!report.worker_ids.is_empty());
+        assert_eq!(report.worker_ids.len(), 2);
+        // After immediate scheduling, tasks may already be leased,
+        // so queued+running should total 2.
+        let status = manager.run_status(&report.run_id).unwrap();
+        assert_eq!(status.queued + status.running, 2);
+    }
+
+    #[test]
+    fn fleet_security_policy_propagates_from_task_spec_document_to_run() {
+        let tmp = TempDir::new().unwrap();
+        let manager = FleetManager::open(tmp.path()).unwrap();
+        let path = task_spec_file(&tmp, vec![task("task-a")]);
+        // Rewrite the spec file with a security_policy block.
+        let doc = serde_json::json!({
+            "name": "secure smoke",
+            "tasks": [{
+                "id": "task-a",
+                "name": "task-a",
+                "instructions": "report ok",
+                "expected_artifacts": ["log"]
+            }],
+            "security_policy": {
+                "default_trust_level": "local",
+                "allowed_secrets": [{"key": "GH_TOKEN", "source": "env"}],
+                "max_trust_level": "remote_verified",
+                "require_identity_verification": true
+            }
+        });
+        let spec_path = tmp.path().join("secure-tasks.json");
+        std::fs::write(&spec_path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+
+        let report = manager
+            .create_run_from_task_spec_path(&spec_path, 1)
+            .unwrap();
+
+        let state = manager.ledger.rebuild_state().unwrap();
+        let run = state.runs.get(&report.run_id.0).unwrap();
+        let policy = run.security_policy.as_ref().unwrap();
+        assert_eq!(policy.default_trust_level, FleetTrustLevel::Local);
+        assert_eq!(policy.allowed_secrets.len(), 1);
+        assert_eq!(policy.allowed_secrets[0].key, "GH_TOKEN");
+        assert_eq!(policy.max_trust_level, FleetTrustLevel::RemoteVerified);
+        assert!(policy.require_identity_verification);
     }
 }

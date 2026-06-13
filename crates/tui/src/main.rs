@@ -1193,8 +1193,9 @@ async fn main() -> Result<()> {
                 run_swebench_command(&config, &model, workspace, max_subagents, args).await
             }
             Commands::Fleet(args) => {
+                let config = load_config_from_cli(&cli)?;
                 let workspace = resolve_workspace(&cli);
-                run_fleet_command(&workspace, args).await
+                run_fleet_command(&workspace, &config, args).await
             }
             Commands::Review(args) => {
                 let config = load_config_from_cli(&cli)?;
@@ -1458,7 +1459,7 @@ async fn run_swebench_command(
     }
 }
 
-async fn run_fleet_command(workspace: &Path, args: FleetArgs) -> Result<()> {
+async fn run_fleet_command(workspace: &Path, config: &Config, args: FleetArgs) -> Result<()> {
     use crate::fleet::alerts::{
         FleetAlertAdapterConfig, FleetAlertConfig, FleetAlertDispatcher, FleetAlertEvent,
         FleetEnvSecretResolver,
@@ -1712,7 +1713,12 @@ async fn run_fleet_command(workspace: &Path, args: FleetArgs) -> Result<()> {
         }
     }
 
-    let manager = FleetManager::open(workspace)?;
+    let exec_config = config
+        .fleet
+        .as_ref()
+        .map(|fleet| fleet.exec.clone())
+        .unwrap_or_default();
+    let manager = FleetManager::open(workspace)?.with_exec_config(exec_config);
     match args.command {
         FleetCommand::Init => {
             println!("fleet ledger: {}", manager.ledger_path().display());

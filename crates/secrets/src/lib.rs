@@ -737,6 +737,44 @@ impl Secrets {
     pub fn get(&self, name: &str) -> Result<Option<String>, SecretsError> {
         self.store.get(name)
     }
+
+    /// Resolve a secret by key name with an optional source constraint.
+    ///
+    /// This is the fleet-worker secret resolution path. Unlike
+    /// [`resolve`](Secrets::resolve), this does NOT map provider names
+    /// to their canonical env vars — the caller controls the exact key
+    /// and resolution order.
+    ///
+    /// `source_hint` controls the resolution order:
+    /// - `Some("env")` — only check environment variables
+    /// - `Some("keyring")` — only check the keyring/file store
+    /// - `None` — try the store first, then fall back to environment
+    #[must_use]
+    pub fn resolve_direct(&self, key: &str, source_hint: Option<&str>) -> Option<String> {
+        match source_hint {
+            Some("env") => {
+                // Only check process environment — skip the store entirely.
+                std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+            }
+            Some("keyring") | Some("file") => {
+                // Only check the store backend.
+                self.store
+                    .get(key)
+                    .ok()
+                    .flatten()
+                    .filter(|v| !v.trim().is_empty())
+            }
+            Some(_) | None => {
+                // Default: store first, then env fallback.
+                if let Ok(Some(v)) = self.store.get(key)
+                    && !v.trim().is_empty()
+                {
+                    return Some(v);
+                }
+                std::env::var(key).ok().filter(|v| !v.trim().is_empty())
+            }
+        }
+    }
 }
 
 /// Map a canonical provider name to its environment variable(s), returning

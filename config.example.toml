@@ -916,6 +916,57 @@ default_text_model = "deepseek-ai/deepseek-v4-pro"
 # ```
 
 # ─────────────────────────────────────────────────────────────────────────────────
+# Agent Fleet trust, security, and role registry (#3165, #3167)
+# ─────────────────────────────────────────────────────────────────────────────────
+# [fleet]
+# # Default trust level for fleet workers: "sandbox" | "local" | "remote-verified" | "operator"
+# default_trust_level = "sandbox"
+# # Require SSH host-key verification before granting remote-verified trust
+# require_identity_verification = true
+# # Maximum trust level any worker may have
+# max_trust_level = "operator"
+#
+# # Headless worker execution hardening (#3027)
+# [fleet.exec]
+# # Tools always allowed regardless of role
+# allowed_tools = []
+# # Tools always disallowed (overrides role and task spec)
+# disallowed_tools = ["exec_shell"]
+# # Hard ceiling on worker steps (tool calls + model turns)
+# max_turns = 500
+# # Recursive child-agent depth for fleet workers. Shares ONE recursion axis
+# # with standalone sub-agents (a fleet worker IS a headless sub-agent).
+# # 0 blocks child agents (the root worker still runs); 3 is the default and the
+# # cap, affording at least three nested delegation levels.
+# max_spawn_depth = 3
+# # Extra system prompt injected into every headless worker
+# append_system_prompt = "Never modify .git/config or change remotes."
+# # Output format: "text" (default) or "stream-json" for ndjson events
+# output_format = "text"
+#
+# # Built-in role presets are always available: smoke-runner, reviewer, builder, read-only.
+# # User-defined roles here override or extend the built-in set. Any key under
+# # [fleet.roles] becomes a valid role name that task specs can reference.
+# [fleet.roles.ci-linter]
+# description = "Runs linters and formatters"
+# tool_profile = "read-only"
+# tools = ["cargo", "cargo-clippy", "cargo-fmt"]
+# capabilities = ["rust"]
+# max_tokens = 12000
+# max_tool_calls = 20
+# timeout_seconds = 600
+#
+# [fleet.roles.pr-reviewer]
+# description = "Reviews PRs with GitHub access"
+# tool_profile = "read-only"
+# tools = ["git", "gh", "rg"]
+# capabilities = ["git", "github"]
+# max_tokens = 16000
+# max_tool_calls = 30
+# timeout_seconds = 900
+# trust_level = "local"
+
+# ─────────────────────────────────────────────────────────────────────────────────
 # Requirements (admin constraints) example file
 # ─────────────────────────────────────────────────────────────────────────────────
 # allowed_approval_policies = ["on-request", "untrusted", "never"]

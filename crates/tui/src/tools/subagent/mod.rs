@@ -1161,8 +1161,13 @@ impl Default for PersistedSubAgentState {
 }
 
 /// Default cap on sub-agent recursion depth. Override via
-/// `[runtime] max_spawn_depth = N` in `~/.deepseek/config.toml`.
-pub const DEFAULT_MAX_SPAWN_DEPTH: u32 = 3;
+/// `[runtime] max_spawn_depth = N` in config.
+///
+/// Sourced from [`codewhale_config::DEFAULT_SPAWN_DEPTH`] so standalone
+/// sub-agents and fleet workers share ONE recursion axis (no "two moving
+/// targets"). Configured/requested depths clamp to
+/// [`codewhale_config::MAX_SPAWN_DEPTH_CEILING`].
+pub const DEFAULT_MAX_SPAWN_DEPTH: u32 = codewhale_config::DEFAULT_SPAWN_DEPTH;
 
 /// Terminal-state notification emitted to the engine's parent turn loop
 /// when one of its direct children finishes (issue #756). Carries the
@@ -1794,7 +1799,7 @@ impl SubAgentManager {
             .retain(|worker_id, _| keep_ids.contains(worker_id));
     }
 
-    fn register_worker(&mut self, spec: AgentWorkerSpec) {
+    pub fn register_worker(&mut self, spec: AgentWorkerSpec) {
         let worker_id = spec.worker_id.clone();
         let now_ms = epoch_millis_now();
         let mut record = AgentWorkerRecord::new(normalize_worker_spec(spec), now_ms);
@@ -5927,15 +5932,18 @@ fn parse_spawn_request(input: &Value) -> Result<SpawnRequest, ToolError> {
         .or_else(|| input.get("max_spawn_depth"))
         .and_then(Value::as_u64)
         .map(|depth| {
+            let ceiling = codewhale_config::MAX_SPAWN_DEPTH_CEILING;
             u32::try_from(depth)
-                .map_err(|_| ToolError::invalid_input("max_depth must be between 0 and 3"))
+                .map_err(|_| {
+                    ToolError::invalid_input(format!("max_depth must be between 0 and {ceiling}"))
+                })
                 .and_then(|depth| {
-                    if depth <= 3 {
+                    if depth <= ceiling {
                         Ok(depth)
                     } else {
-                        Err(ToolError::invalid_input(
-                            "max_depth must be between 0 and 3",
-                        ))
+                        Err(ToolError::invalid_input(format!(
+                            "max_depth must be between 0 and {ceiling}"
+                        )))
                     }
                 })
         })

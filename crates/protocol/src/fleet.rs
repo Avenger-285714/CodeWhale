@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use serde_json::Value;
 
 pub const FLEET_PROTOCOL_VERSION: &str = "0.1.0";
@@ -45,6 +45,8 @@ pub struct FleetRun {
     pub worker_specs: Vec<FleetWorkerSpec>,
     #[serde(default)]
     pub labels: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub security_policy: Option<FleetSecurityPolicy>,
     pub created_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
@@ -260,6 +262,9 @@ pub struct FleetWorkerSpec {
     pub name: String,
     pub host: FleetHostSpec,
     #[serde(default)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_level: Option<FleetTrustLevel>,
+    #[serde(default)]
     pub labels: BTreeMap<String, String>,
     #[serde(default)]
     pub capabilities: Vec<String>,
@@ -280,6 +285,14 @@ pub enum FleetHostSpec {
         user: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         identity: Option<PathBuf>,
+        /// Known hosts file for host-key verification.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        known_hosts: Option<PathBuf>,
+        /// Expected host key fingerprint (SHA256:...) for key pinning.
+        /// When set, the connection is only trusted if the server's
+        /// host key matches this fingerprint exactly.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        host_key_fingerprint: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         working_directory: Option<PathBuf>,
         #[serde(default)]
@@ -288,11 +301,271 @@ pub enum FleetHostSpec {
         #[serde(skip_serializing_if = "Option::is_none")]
         codewhale_binary: Option<String>,
     },
+    #[serde(alias = "container")]
+    #[serde(alias = "Container")]
     Docker {
         image: String,
         #[serde(default)]
         args: Vec<String>,
     },
+}
+
+// ── Security and trust types ────────────────────────────────────────────────
+
+/// Trust classification assigned to a worker host.
+///
+/// The trust level determines what a worker is allowed to do and what
+/// secrets it may access. The default for new workers is [`FleetTrustLevel::Sandbox`];
+/// operators must explicitly raise trust for SSH or container workers.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum FleetTrustLevel {
+    /// Fully isolated: no network, no secrets, no writes outside `.codewhale/fleet/`.
+    /// Suitable for untrusted code review, community PR checks, or third-party tool runs.
+    Sandbox = 0,
+    /// Local-only worker with access to the workspace and configured secrets.
+    /// Default for local workers. May read repo files but writes are gated.
+    Local = 1,
+    /// Worker on a known remote host with verified identity and a bounded
+    /// set of explicitly granted capabilities. Requires SSH host-key
+    /// verification or equivalent attestation.
+    #[serde(alias = "remote-verified", alias = "remoteVerified")]
+    RemoteVerified = 2,
+    /// Fully trusted worker (e.g. operator's own machine, CI runner).
+    /// Has access to all configured secrets and may perform any action the
+    /// operator can. Reserved for dogfood smoke and operator-owned machines.
+    Operator = 3,
+}
+
+impl Default for FleetTrustLevel {
+    fn default() -> Self {
+        Self::Sandbox
+    }
+}
+
+impl FleetTrustLevel {
+    /// Whether this trust level is allowed to access provider secrets.
+    #[must_use]
+    pub fn may_access_secrets(&self) -> bool {
+        matches!(self, Self::Operator | Self::RemoteVerified | Self::Local)
+    }
+
+    /// Whether this trust level is allowed to write outside `.codewhale/fleet/`.
+    #[must_use]
+    pub fn may_write_workspace(&self) -> bool {
+        matches!(self, Self::Operator | Self::Local)
+    }
+
+    /// Whether this trust level is allowed network access.
+    #[must_use]
+    pub fn may_access_network(&self) -> bool {
+        matches!(self, Self::Operator | Self::RemoteVerified | Self::Local)
+    }
+}
+
+/// Security policy applied to a fleet run.
+///
+/// A policy defines the default trust level for workers, which secrets
+/// may be resolved, and what capabilities are granted. When a run has no
+/// explicit policy, workers inherit conservative defaults.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FleetSecurityPolicy {
+    /// Default trust level for workers that don't declare one explicitly.
+    #[serde(default)]
+    pub default_trust_level: FleetTrustLevel,
+    /// Secret refs that workers may resolve. An empty list means no secrets
+    /// are available. Each entry is a key name, not a value.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub allowed_secrets: Vec<FleetSecretRef>,
+    /// Capability grants for workers in this run.
+    #[serde(default)]
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub capability_grants: Vec<FleetCapabilityGrant>,
+    /// Maximum trust level any worker in this run may have, even if the
+    /// worker spec requests higher. Defaults to Operator (no ceiling).
+    #[serde(default = "default_max_trust_level")]
+    pub max_trust_level: FleetTrustLevel,
+    /// Require identity verification for remote workers. When true, SSH
+    /// workers must pass host-key verification before being trusted at
+    /// RemoteVerified level; unverified remotes stay at Sandbox.
+    #[serde(default)]
+    pub require_identity_verification: bool,
+    /// Allow conservative parallel execution of read-only tools (#2983).
+    /// When true, workers may batch independent read-only tool calls
+    /// (reads, searches, greps) into concurrent turns. Disabled by default
+    /// to avoid overwhelming providers or hitting rate limits.
+    #[serde(default)]
+    pub allow_parallel_reads: bool,
+}
+
+fn default_max_trust_level() -> FleetTrustLevel {
+    FleetTrustLevel::Operator
+}
+
+impl Default for FleetSecurityPolicy {
+    fn default() -> Self {
+        Self {
+            default_trust_level: FleetTrustLevel::Sandbox,
+            allowed_secrets: Vec::new(),
+            capability_grants: Vec::new(),
+            max_trust_level: FleetTrustLevel::Operator,
+            require_identity_verification: false,
+            allow_parallel_reads: false,
+        }
+    }
+}
+
+/// A reference to a secret that should be resolved at runtime, never
+/// serialized as a plaintext value.
+///
+/// Secret refs appear in task specs, alert configs, and worker definitions.
+/// The actual secret value is resolved by the fleet manager from the
+/// secrets backend (OS keyring, environment, or file store) just before
+/// the worker starts.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FleetSecretRef {
+    /// The secret key name (e.g. `"CODEWHALE_API_KEY"`, `"GH_TOKEN"`).
+    pub key: String,
+    /// Optional source hint for resolution order.
+    /// - `"env"` — resolve from environment variable
+    /// - `"keyring"` — resolve from OS keyring
+    /// - `"file"` — resolve from `~/.codewhale/secrets/`
+    /// - absent / null — try all sources in default order
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+impl FleetSecretRef {
+    /// Create a secret ref from a key name with default resolution.
+    #[must_use]
+    pub fn new(key: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            source: None,
+        }
+    }
+
+    /// Create a secret ref with an explicit source.
+    #[must_use]
+    pub fn with_source(key: impl Into<String>, source: impl Into<String>) -> Self {
+        Self {
+            key: key.into(),
+            source: Some(source.into()),
+        }
+    }
+
+    /// Redacted display form for logging. Shows the key name and source
+    /// but never the resolved value.
+    #[must_use]
+    pub fn redacted(&self) -> String {
+        match &self.source {
+            Some(src) => format!("<secret:{}.{}>", src, self.key),
+            None => format!("<secret:{}>", self.key),
+        }
+    }
+}
+
+impl std::fmt::Display for FleetSecretRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.redacted())
+    }
+}
+
+impl From<&str> for FleetSecretRef {
+    fn from(key: &str) -> Self {
+        Self::new(key)
+    }
+}
+
+impl From<String> for FleetSecretRef {
+    fn from(key: String) -> Self {
+        Self::new(key)
+    }
+}
+
+impl<'de> Deserialize<'de> for FleetSecretRef {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum SecretRefWire {
+            Key(String),
+            Structured {
+                key: String,
+                #[serde(default)]
+                source: Option<String>,
+            },
+        }
+
+        match SecretRefWire::deserialize(deserializer)? {
+            SecretRefWire::Key(key) if !key.trim().is_empty() => Ok(FleetSecretRef::new(key)),
+            SecretRefWire::Key(_) => Err(de::Error::custom("secret ref key cannot be empty")),
+            SecretRefWire::Structured { key, source } if !key.trim().is_empty() => {
+                Ok(FleetSecretRef { key, source })
+            }
+            SecretRefWire::Structured { .. } => {
+                Err(de::Error::custom("secret ref key cannot be empty"))
+            }
+        }
+    }
+}
+
+/// How a worker authenticates to the fleet manager.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "method", rename_all = "snake_case")]
+pub enum FleetWorkerAuth {
+    /// No authentication (local workers share the same uid).
+    None,
+    /// SSH key-based authentication with host-key verification.
+    SshKey {
+        /// Path to the SSH identity file (may be a FleetSecretRef in JSON
+        /// as `{"key": "...", "source": "file"}`).
+        identity: PathBuf,
+        /// Known hosts file for host-key verification.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        known_hosts: Option<PathBuf>,
+        /// Expected host key fingerprint for pinning.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        host_key_fingerprint: Option<String>,
+        /// SSH user for the connection.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+    },
+    /// Token-based authentication for remote workers behind a fleet proxy.
+    Token {
+        /// Reference to the token secret.
+        token_ref: FleetSecretRef,
+    },
+    /// mTLS certificate-based authentication.
+    Mtls {
+        /// Path to the client certificate.
+        cert_path: PathBuf,
+        /// Reference to the private key secret.
+        key_ref: FleetSecretRef,
+    },
+}
+
+/// A capability grant that explicitly authorizes a worker to perform
+/// a specific class of action.
+///
+/// By default, new workers get no grants (least privilege). Grants are
+/// additive: a worker's effective capabilities are the union of its
+/// trust-level defaults plus any explicit grants.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FleetCapabilityGrant {
+    /// The capability being granted (e.g. `"network"`, `"git-push"`,
+    /// `"provider-secrets"`, `"release"`).
+    pub capability: String,
+    /// Optional scope limiting the grant (e.g. `"github.com"` for network,
+    /// `"crates/tui/**"` for file writes).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// Optional justification for the grant (audit trail).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Runtime status of a worker.
@@ -469,16 +742,82 @@ pub enum FleetAlertEventClass {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum FleetAlertChannel {
     Slack {
-        webhook_url: String,
+        /// Webhook URL, resolved from a secret ref or inline.
+        #[serde(flatten)]
+        webhook: FleetAlertEndpoint,
     },
     Webhook {
-        url: String,
-        secret: Option<String>,
+        #[serde(flatten)]
+        endpoint: FleetAlertEndpoint,
     },
+    #[serde(alias = "pager_duty")]
+    #[serde(alias = "pagerduty")]
     PagerDuty {
         routing_key: String,
         severity: String,
     },
+}
+
+/// An alert channel endpoint, supporting both inline URLs and secret refs.
+///
+/// For Slack and generic webhook channels, the URL may be provided directly
+/// or as a secret reference resolved at send time. When both `url` and
+/// `url_ref` are present, `url_ref` takes precedence after resolution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FleetAlertEndpoint {
+    /// Inline URL (plaintext; only for non-sensitive endpoints).
+    #[serde(
+        alias = "webhook_url",
+        alias = "endpoint_url",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub url: Option<String>,
+    /// Reference to a secret containing the webhook URL.
+    #[serde(
+        alias = "webhook_url_ref",
+        alias = "webhook_ref",
+        alias = "url_secret_ref",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub url_ref: Option<FleetSecretRef>,
+    /// Optional HMAC secret for webhook payload signing, as a secret ref.
+    #[serde(
+        alias = "secret",
+        alias = "webhook_secret",
+        alias = "signing_secret",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub secret_ref: Option<FleetSecretRef>,
+}
+
+impl FleetAlertEndpoint {
+    /// Create an inline URL endpoint (for non-sensitive use).
+    #[must_use]
+    pub fn inline(url: impl Into<String>) -> Self {
+        Self {
+            url: Some(url.into()),
+            url_ref: None,
+            secret_ref: None,
+        }
+    }
+
+    /// Create a secret-backed URL endpoint.
+    #[must_use]
+    pub fn from_secret(url_ref: FleetSecretRef) -> Self {
+        Self {
+            url: None,
+            url_ref: Some(url_ref),
+            secret_ref: None,
+        }
+    }
+
+    /// Redacted display form for logging.
+    #[must_use]
+    pub fn redacted(&self) -> String {
+        self.url_ref
+            .as_ref()
+            .map_or_else(|| "<inline-url>".to_string(), |r| r.redacted())
+    }
 }
 
 /// Receipt produced when a task completes verification.
@@ -573,6 +912,7 @@ mod tests {
             }],
             worker_specs: vec![],
             labels: BTreeMap::new(),
+            security_policy: None,
             created_at: "2026-06-12T17:00:00Z".to_string(),
             updated_at: None,
             completed_at: None,
@@ -648,7 +988,7 @@ mod tests {
         let policy = FleetAlertPolicy {
             events: vec![FleetAlertEventClass::Stale],
             channels: vec![FleetAlertChannel::Slack {
-                webhook_url: "https://hooks.slack.com/test".to_string(),
+                webhook: FleetAlertEndpoint::inline("https://hooks.slack.com/test"),
             }],
             after_attempts: Some(2),
             after_minutes_stale: Some(10),
@@ -687,6 +1027,8 @@ mod tests {
                 port,
                 user,
                 identity,
+                known_hosts,
+                host_key_fingerprint,
                 working_directory,
                 env_allowlist,
                 codewhale_binary,
@@ -695,6 +1037,8 @@ mod tests {
                 assert_eq!(port, None);
                 assert_eq!(user, None);
                 assert_eq!(identity, None);
+                assert_eq!(known_hosts, None);
+                assert_eq!(host_key_fingerprint, None);
                 assert_eq!(working_directory, None);
                 assert!(env_allowlist.is_empty());
                 assert_eq!(codewhale_binary, None);
@@ -800,5 +1144,132 @@ mod tests {
         let back: FleetReceipt = serde_json::from_str(&json).unwrap();
         assert_eq!(back.result, FleetTaskResult::Partial);
         assert_eq!(back.failure_kind, Some(FleetTaskFailureKind::Verifier));
+    }
+
+    #[test]
+    fn ssh_host_spec_with_key_pinning_round_trip() {
+        let spec = FleetHostSpec::Ssh {
+            host: "builder.trusted.example.com".to_string(),
+            port: Some(22),
+            user: Some("codewhale".to_string()),
+            identity: Some(PathBuf::from("~/.ssh/codewhale_fleet")),
+            known_hosts: Some(PathBuf::from("~/.ssh/known_hosts")),
+            host_key_fingerprint: Some("SHA256:aLGqZo1M6c...".to_string()),
+            working_directory: Some(PathBuf::from("/srv/codewhale/work")),
+            env_allowlist: vec!["CODEWHALE_PROFILE".to_string()],
+            codewhale_binary: Some("/usr/local/bin/codewhale".to_string()),
+        };
+        let json = serde_json::to_string_pretty(&spec).unwrap();
+        assert!(json.contains("\"known_hosts\""));
+        assert!(json.contains("\"host_key_fingerprint\""));
+        assert!(json.contains("SHA256:aLGqZo1M6c..."));
+
+        let back: FleetHostSpec = serde_json::from_str(&json).unwrap();
+        match back {
+            FleetHostSpec::Ssh {
+                host,
+                known_hosts,
+                host_key_fingerprint,
+                ..
+            } => {
+                assert_eq!(host, "builder.trusted.example.com");
+                assert_eq!(known_hosts, Some(PathBuf::from("~/.ssh/known_hosts")));
+                assert_eq!(
+                    host_key_fingerprint,
+                    Some("SHA256:aLGqZo1M6c...".to_string())
+                );
+            }
+            other => panic!("expected ssh host spec, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn secret_ref_redacted_never_exposes_value() {
+        let ref_ = FleetSecretRef::new("DEEPSEEK_API_KEY");
+        let redacted = ref_.redacted();
+        assert!(redacted.contains("DEEPSEEK_API_KEY"));
+        assert!(!redacted.contains("sk-"));
+        assert!(redacted.contains("<secret:"));
+
+        let ref_ = FleetSecretRef::with_source("GH_TOKEN", "env");
+        let redacted = ref_.redacted();
+        assert!(redacted.contains("env.GH_TOKEN"));
+        assert!(!redacted.contains("ghp_"));
+    }
+
+    #[test]
+    fn alert_endpoint_from_secret_round_trip() {
+        let endpoint = FleetAlertEndpoint::from_secret(FleetSecretRef::new("SLACK_WEBHOOK"));
+        let json = serde_json::to_string(&endpoint).unwrap();
+        assert!(json.contains("SLACK_WEBHOOK"));
+        assert!(!json.contains("hooks.slack.com"));
+
+        let back: FleetAlertEndpoint = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.url_ref.as_ref().unwrap().key, "SLACK_WEBHOOK");
+        assert_eq!(back.url, None);
+    }
+
+    #[test]
+    fn secret_ref_accepts_legacy_string_wire_shape() {
+        let ref_: FleetSecretRef = serde_json::from_str(r#""CODEWHALE_FLEET_TOKEN""#).unwrap();
+        assert_eq!(ref_, FleetSecretRef::new("CODEWHALE_FLEET_TOKEN"));
+
+        let ref_: FleetSecretRef =
+            serde_json::from_str(r#"{"key":"GH_TOKEN","source":"env"}"#).unwrap();
+        assert_eq!(ref_, FleetSecretRef::with_source("GH_TOKEN", "env"));
+    }
+
+    #[test]
+    fn trust_level_accepts_hyphenated_remote_verified() {
+        let trust: FleetTrustLevel = serde_json::from_str(r#""remote-verified""#).unwrap();
+        assert_eq!(trust, FleetTrustLevel::RemoteVerified);
+
+        let canonical = serde_json::to_string(&trust).unwrap();
+        assert_eq!(canonical, r#""remote_verified""#);
+    }
+
+    #[test]
+    fn alert_channel_accepts_legacy_webhook_fields() {
+        let channel: FleetAlertChannel = serde_json::from_str(
+            r#"{
+                "kind": "slack",
+                "webhook_url": "https://hooks.slack.com/test",
+                "secret": "SLACK_SIGNING_SECRET"
+            }"#,
+        )
+        .unwrap();
+
+        match channel {
+            FleetAlertChannel::Slack { webhook } => {
+                assert_eq!(webhook.url.as_deref(), Some("https://hooks.slack.com/test"));
+                assert_eq!(
+                    webhook.secret_ref,
+                    Some(FleetSecretRef::new("SLACK_SIGNING_SECRET"))
+                );
+            }
+            other => panic!("expected slack channel, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn security_policy_defaults_are_conservative() {
+        let policy = FleetSecurityPolicy::default();
+        assert_eq!(policy.default_trust_level, FleetTrustLevel::Sandbox);
+        assert!(policy.allowed_secrets.is_empty());
+        assert!(policy.capability_grants.is_empty());
+        assert_eq!(policy.max_trust_level, FleetTrustLevel::Operator);
+        assert!(!policy.require_identity_verification);
+    }
+
+    #[test]
+    fn trust_level_ordinal_reflects_privilege() {
+        assert!(FleetTrustLevel::Operator > FleetTrustLevel::RemoteVerified);
+        assert!(FleetTrustLevel::RemoteVerified > FleetTrustLevel::Local);
+        assert!(FleetTrustLevel::Local > FleetTrustLevel::Sandbox);
+
+        assert!(FleetTrustLevel::Operator.may_access_secrets());
+        assert!(!FleetTrustLevel::Sandbox.may_access_secrets());
+        assert!(!FleetTrustLevel::Sandbox.may_write_workspace());
+        assert!(FleetTrustLevel::Operator.may_write_workspace());
     }
 }

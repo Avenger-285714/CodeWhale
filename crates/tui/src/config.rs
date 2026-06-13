@@ -1854,6 +1854,10 @@ pub struct Config {
     #[serde(default)]
     pub context: ContextConfig,
 
+    /// Agent Fleet trust/security/role/exec config.
+    #[serde(default)]
+    pub fleet: Option<codewhale_config::FleetConfigToml>,
+
     /// Sub-agent model overrides.
     #[serde(default)]
     pub subagents: Option<SubagentsConfig>,
@@ -4983,6 +4987,7 @@ fn merge_config(base: Config, override_cfg: Config) -> Config {
                 .or(base.context.l3_threshold),
             seam_model: override_cfg.context.seam_model.or(base.context.seam_model),
         },
+        fleet: override_cfg.fleet.or(base.fleet),
         subagents: override_cfg.subagents.or(base.subagents),
         strict_tool_mode: override_cfg.strict_tool_mode.or(base.strict_tool_mode),
         runtime_api: override_cfg.runtime_api.or(base.runtime_api),

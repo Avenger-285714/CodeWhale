@@ -373,6 +373,8 @@ pub struct SshFleetHostConfig {
     pub user: Option<String>,
     pub port: Option<u16>,
     pub identity: Option<PathBuf>,
+    pub known_hosts: Option<PathBuf>,
+    pub host_key_fingerprint: Option<String>,
     pub working_directory: PathBuf,
     pub env_allowlist: BTreeSet<String>,
     pub codewhale_binary: String,
@@ -387,6 +389,8 @@ impl SshFleetHostConfig {
             user: None,
             port: None,
             identity: None,
+            known_hosts: None,
+            host_key_fingerprint: None,
             working_directory: working_directory.into(),
             env_allowlist: BTreeSet::new(),
             codewhale_binary: "codewhale".to_string(),
@@ -401,6 +405,8 @@ impl SshFleetHostConfig {
             port,
             user,
             identity,
+            known_hosts,
+            host_key_fingerprint,
             working_directory,
             env_allowlist,
             codewhale_binary,
@@ -420,6 +426,8 @@ impl SshFleetHostConfig {
         config.port = *port;
         config.user = user.clone();
         config.identity = identity.clone();
+        config.known_hosts = known_hosts.clone();
+        config.host_key_fingerprint = host_key_fingerprint.clone();
         config.env_allowlist = env_allowlist.iter().cloned().collect();
         config.codewhale_binary = codewhale_binary;
         config.validate()?;
@@ -918,6 +926,8 @@ mod tests {
             port: Some(2222),
             user: Some("fleet".to_string()),
             identity: Some(PathBuf::from("/tmp/fleet_id")),
+            known_hosts: None,
+            host_key_fingerprint: None,
             working_directory: Some(PathBuf::from("/srv/codewhale")),
             env_allowlist: vec!["FLEET_PROFILE".to_string()],
             codewhale_binary: Some("/usr/local/bin/codewhale".to_string()),

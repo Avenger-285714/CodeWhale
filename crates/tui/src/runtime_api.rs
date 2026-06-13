@@ -3980,6 +3980,7 @@ mod tests {
             crate::fleet::task_spec::FleetTaskSpecDocument {
                 name: Some("api smoke".to_string()),
                 labels: std::collections::BTreeMap::new(),
+                security_policy: None,
                 workers: Vec::new(),
                 tasks: vec![task],
             },

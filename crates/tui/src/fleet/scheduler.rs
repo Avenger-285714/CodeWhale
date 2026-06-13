@@ -573,6 +573,7 @@ mod tests {
             id: id.to_string(),
             name: id.to_string(),
             host: FleetHostSpec::Local,
+            trust_level: Some(FleetTrustLevel::Local),
             labels: BTreeMap::new(),
             capabilities: vec!["local".to_string()],
             max_concurrent_tasks: Some(1),
@@ -622,6 +623,7 @@ mod tests {
                     .map(|idx| worker(&format!("worker-{idx}")))
                     .collect(),
                 labels: BTreeMap::new(),
+                security_policy: None,
                 created_at: scheduler.timestamp(),
                 updated_at: None,
                 completed_at: None,
@@ -704,7 +706,7 @@ mod tests {
         failing.alert_policy = Some(FleetAlertPolicy {
             events: vec![FleetAlertEventClass::RestartExhausted],
             channels: vec![FleetAlertChannel::Slack {
-                webhook_url: "https://hooks.slack.invalid/secret".to_string(),
+                webhook: FleetAlertEndpoint::inline("https://hooks.slack.invalid/secret"),
             }],
             after_attempts: Some(1),
             after_minutes_stale: Some(1),

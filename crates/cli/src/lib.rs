@@ -22,7 +22,7 @@ use codewhale_mcp::{McpServerDefinition, run_stdio_server};
 use codewhale_secrets::Secrets;
 use codewhale_state::{StateStore, ThreadListFilters};
 
-#[derive(Debug, Clone, Copy, ValueEnum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ProviderArg {
     Deepseek,
     NvidiaNim,
@@ -43,6 +43,10 @@ enum ProviderArg {
     Huggingface,
     Together,
     OpenaiCodex,
+    Anthropic,
+    Zai,
+    Stepfun,
+    Minimax,
 }
 
 impl From<ProviderArg> for ProviderKind {
@@ -67,6 +71,10 @@ impl From<ProviderArg> for ProviderKind {
             ProviderArg::Huggingface => ProviderKind::Huggingface,
             ProviderArg::Together => ProviderKind::Together,
             ProviderArg::OpenaiCodex => ProviderKind::OpenaiCodex,
+            ProviderArg::Anthropic => ProviderKind::Anthropic,
+            ProviderArg::Zai => ProviderKind::Zai,
+            ProviderArg::Stepfun => ProviderKind::Stepfun,
+            ProviderArg::Minimax => ProviderKind::Minimax,
         }
     }
 }
@@ -787,7 +795,7 @@ fn provider_slot(provider: ProviderKind) -> &'static str {
 }
 
 /// Provider order used by the `auth list` and `auth status` outputs.
-const PROVIDER_LIST: [ProviderKind; 20] = [
+const PROVIDER_LIST: [ProviderKind; 24] = [
     ProviderKind::Deepseek,
     ProviderKind::NvidiaNim,
     ProviderKind::Openai,
@@ -808,6 +816,10 @@ const PROVIDER_LIST: [ProviderKind; 20] = [
     ProviderKind::Huggingface,
     ProviderKind::Together,
     ProviderKind::OpenaiCodex,
+    ProviderKind::Anthropic,
+    ProviderKind::Zai,
+    ProviderKind::Stepfun,
+    ProviderKind::Minimax,
 ];
 
 fn provider_is_supported_by_tui(provider: ProviderKind) -> bool {
@@ -833,6 +845,10 @@ fn provider_is_supported_by_tui(provider: ProviderKind) -> bool {
             | ProviderKind::Huggingface
             | ProviderKind::Together
             | ProviderKind::OpenaiCodex
+            | ProviderKind::Anthropic
+            | ProviderKind::Zai
+            | ProviderKind::Stepfun
+            | ProviderKind::Minimax
     )
 }
 
@@ -2605,6 +2621,32 @@ mod tests {
                 }
             }))
         ));
+
+        for (provider, expected) in [
+            ("anthropic", ProviderArg::Anthropic),
+            ("zai", ProviderArg::Zai),
+            ("stepfun", ProviderArg::Stepfun),
+            ("minimax", ProviderArg::Minimax),
+        ] {
+            let cli = parse_ok(&[
+                "deepseek",
+                "auth",
+                "set",
+                "--provider",
+                provider,
+                "--api-key-stdin",
+            ]);
+            assert!(matches!(
+                cli.command,
+                Some(Commands::Auth(AuthArgs {
+                    command: AuthCommand::Set {
+                        provider,
+                        api_key: None,
+                        api_key_stdin: true,
+                    }
+                })) if provider == expected
+            ));
+        }
 
         let cli = parse_ok(&["deepseek", "auth", "list"]);
         assert!(matches!(

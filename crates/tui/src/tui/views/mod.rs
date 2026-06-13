@@ -412,6 +412,7 @@ enum ConfigSection {
     Sidebar,
     History,
     Mcp,
+    Fleet,
     Experimental,
 }
 
@@ -429,6 +430,7 @@ impl ConfigSection {
                 ConfigSection::Sidebar => MessageId::ConfigSectionSidebar,
                 ConfigSection::History => MessageId::ConfigSectionHistory,
                 ConfigSection::Mcp => MessageId::ConfigSectionMcp,
+                ConfigSection::Fleet => MessageId::ConfigSectionFleet,
                 ConfigSection::Experimental => MessageId::ConfigSectionExperimental,
             },
         )
@@ -757,6 +759,18 @@ impl ConfigView {
                 key: "mcp_config_path".to_string(),
                 value: app.mcp_config_path.display().to_string(),
                 editable: true,
+                scope: ConfigScope::Saved,
+            },
+            ConfigRow {
+                section: ConfigSection::Fleet,
+                key: "fleet.exec.max_spawn_depth".to_string(),
+                value: config
+                    .fleet
+                    .as_ref()
+                    .map(|fleet| fleet.exec.max_spawn_depth)
+                    .unwrap_or_else(|| codewhale_config::FleetExecConfig::default().max_spawn_depth)
+                    .to_string(),
+                editable: false,
                 scope: ConfigScope::Saved,
             },
         ];
@@ -1180,7 +1194,7 @@ fn experimental_config_rows(config: &Config) -> Vec<ConfigRow> {
     rows.push(ConfigRow {
         section: ConfigSection::Experimental,
         key: "whaleflow".to_string(),
-        value: "preview placeholder (not stable; see #2981/#2974)".to_string(),
+        value: "preview overlay for workflow/fleet runs (not stable; see #3154/#3178)".to_string(),
         editable: false,
         scope: ConfigScope::Saved,
     });
@@ -1235,6 +1249,9 @@ fn config_hint_for_key(key: &str) -> &'static str {
             "DeepSeek: auto/off/high/max; Codex: low/medium/high/xhigh; default clears saved value"
         }
         "mcp_config_path" => "path to mcp.json",
+        "fleet.exec.max_spawn_depth" => {
+            "0 blocks child agents; 3 default (same axis as sub-agents); capped at 3"
+        }
         _ => "",
     }
 }
@@ -2393,6 +2410,7 @@ mod tests {
                 "Sidebar",
                 "History",
                 "MCP",
+                "Fleet",
                 "Experimental",
             ]
         );
@@ -2429,6 +2447,7 @@ mod tests {
         assert!(keys.contains(&"cost_currency"));
         assert!(keys.contains(&"prefer_external_pdftotext"));
         assert!(keys.contains(&"mcp_config_path"));
+        assert!(keys.contains(&"fleet.exec.max_spawn_depth"));
         assert!(keys.contains(&"features.subagents"));
         assert!(keys.contains(&"features.web_search"));
         assert!(keys.contains(&"features.apply_patch"));
@@ -2440,13 +2459,23 @@ mod tests {
         assert!(
             view.rows
                 .iter()
-                .filter(|row| row.section != super::ConfigSection::Experimental)
+                .filter(|row| {
+                    !matches!(
+                        row.section,
+                        super::ConfigSection::Experimental | super::ConfigSection::Fleet
+                    )
+                })
                 .all(|row| row.editable)
         );
         assert!(
             view.rows
                 .iter()
-                .filter(|row| row.section == super::ConfigSection::Experimental)
+                .filter(|row| {
+                    matches!(
+                        row.section,
+                        super::ConfigSection::Experimental | super::ConfigSection::Fleet
+                    )
+                })
                 .all(|row| !row.editable)
         );
     }
@@ -2495,6 +2524,36 @@ vision_model = true
             .find(|row| row.key == "features.subagents")
             .expect("subagents feature row");
         assert_eq!(subagents.value, "enabled (default enabled)");
+    }
+
+    #[test]
+    fn config_view_shows_fleet_max_spawn_depth_from_config() {
+        let temp_root = std::env::temp_dir().join(format!(
+            "codewhale-fleet-config-view-test-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_root).unwrap();
+        let config_path = temp_root.join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[fleet.exec]
+max_spawn_depth = 2
+"#,
+        )
+        .unwrap();
+
+        let mut app = create_test_app();
+        app.config_path = Some(config_path);
+        let view = ConfigView::new_for_app(&app);
+
+        let row = view
+            .rows
+            .iter()
+            .find(|row| row.key == "fleet.exec.max_spawn_depth")
+            .expect("fleet spawn depth row");
+        assert_eq!(row.value, "2");
+        assert!(!row.editable);
     }
 
     #[test]

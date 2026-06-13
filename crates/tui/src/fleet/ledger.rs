@@ -661,12 +661,21 @@ fn sanitize_run_for_ledger(run: &FleetRun) -> FleetRun {
         if let Some(policy) = &mut task.alert_policy {
             for channel in &mut policy.channels {
                 match channel {
-                    FleetAlertChannel::Slack { webhook_url } => {
-                        *webhook_url = "<redacted>".to_string();
+                    FleetAlertChannel::Slack { webhook } => {
+                        webhook.url = webhook.url.as_ref().map(|_| "<redacted>".to_string());
                     }
-                    FleetAlertChannel::Webhook { url, secret } => {
-                        *url = "<redacted>".to_string();
-                        *secret = secret.as_ref().map(|_| "<redacted>".to_string());
+                    FleetAlertChannel::Webhook { endpoint } => {
+                        *endpoint = FleetAlertEndpoint {
+                            url: endpoint.url.as_ref().map(|_| "<redacted>".to_string()),
+                            url_ref: endpoint
+                                .url_ref
+                                .as_ref()
+                                .map(|_| FleetSecretRef::new("<redacted>")),
+                            secret_ref: endpoint
+                                .secret_ref
+                                .as_ref()
+                                .map(|_| FleetSecretRef::new("<redacted>")),
+                        };
                     }
                     FleetAlertChannel::PagerDuty { routing_key, .. } => {
                         *routing_key = "<redacted>".to_string();
@@ -691,6 +700,7 @@ mod tests {
             task_specs: vec![],
             worker_specs: vec![],
             labels: BTreeMap::new(),
+            security_policy: None,
             created_at: "2026-06-12T17:00:00Z".to_string(),
             updated_at: None,
             completed_at: None,
