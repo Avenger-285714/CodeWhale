@@ -6097,6 +6097,7 @@ async fn run_interactive(
     .await
 }
 
+#[derive(Debug)]
 struct CliAutoRoute {
     provider: crate::config::ApiProvider,
     model: String,
@@ -6144,6 +6145,30 @@ async fn resolve_cli_auto_route(
             auto_model: true,
         })
     } else {
+        if let Some(selection) = model_routing::resolve_explicit_route_with_inventory(config, model)
+        {
+            return Ok(CliAutoRoute {
+                provider: selection.provider,
+                model: selection.model,
+                reasoning_effort: selection.reasoning_effort,
+                auto_model: false,
+            });
+        }
+
+        let candidate_providers = model_routing::explicit_route_candidate_providers(config, model);
+        if !candidate_providers.is_empty() && !candidate_providers.contains(&config.api_provider())
+        {
+            let providers = candidate_providers
+                .iter()
+                .map(|provider| provider.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            bail!(
+                "model `{model}` is available from configured provider route(s): {providers}. \
+                 Pass `--provider <provider>` with `--model {model}` to choose one explicitly."
+            );
+        }
+
         // When --model is not `auto`, fall back to the reasoning_effort
         // declared in the user's config.toml. The previous hard-coded `None`
         // silently dropped the user's setting on every non-auto-route exec
@@ -7301,6 +7326,48 @@ mod terminal_mode_tests {
             resolve_exec_model(&config, None),
             crate::config::DEFAULT_ZAI_MODEL
         );
+    }
+
+    #[tokio::test]
+    async fn explicit_exec_model_routes_to_unique_authenticated_provider_candidate() {
+        let _env_lock = crate::test_support::lock_test_env();
+        let _zai = crate::test_support::EnvVarGuard::set("ZAI_API_KEY", "zai-key");
+        let _openrouter = crate::test_support::EnvVarGuard::remove("OPENROUTER_API_KEY");
+        let config = Config {
+            provider: Some("deepseek".to_string()),
+            default_text_model: Some(crate::config::DEFAULT_TEXT_MODEL.to_string()),
+            ..Default::default()
+        };
+
+        let route = resolve_cli_auto_route(&config, crate::config::ZAI_GLM_5_2_MODEL, "pong")
+            .await
+            .expect("explicit GLM should route to the configured Z.ai provider");
+
+        assert_eq!(route.provider, crate::config::ApiProvider::Zai);
+        assert_eq!(route.model, crate::config::ZAI_GLM_5_2_MODEL);
+        assert!(!route.auto_model);
+    }
+
+    #[tokio::test]
+    async fn explicit_exec_model_reports_ambiguous_authenticated_provider_candidates() {
+        let _env_lock = crate::test_support::lock_test_env();
+        let _zai = crate::test_support::EnvVarGuard::set("ZAI_API_KEY", "zai-key");
+        let _openrouter = crate::test_support::EnvVarGuard::set("OPENROUTER_API_KEY", "or-key");
+        let config = Config {
+            provider: Some("deepseek".to_string()),
+            default_text_model: Some(crate::config::DEFAULT_TEXT_MODEL.to_string()),
+            ..Default::default()
+        };
+
+        let err = resolve_cli_auto_route(&config, crate::config::ZAI_GLM_5_2_MODEL, "pong")
+            .await
+            .expect_err("ambiguous GLM route should ask for an explicit provider");
+        let message = err.to_string();
+
+        assert!(message.contains("model `GLM-5.2` is available"));
+        assert!(message.contains("openrouter"));
+        assert!(message.contains("zai"));
+        assert!(message.contains("--provider"));
     }
 
     #[test]

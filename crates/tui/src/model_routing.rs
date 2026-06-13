@@ -8,7 +8,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 
 use crate::client::DeepSeekClient;
-use crate::config::{ApiProvider, Config};
+use crate::config::{ApiProvider, Config, normalize_model_name_for_provider};
 use crate::llm_client::LlmClient;
 use crate::model_inventory::ModelInventory;
 use crate::models::{ContentBlock, Message, MessageRequest, MessageResponse, SystemPrompt};
@@ -451,6 +451,79 @@ pub(crate) async fn resolve_auto_route_with_inventory(
         }),
         Ok(None) | Err(_) => Ok(heuristic),
     }
+}
+
+pub(crate) fn resolve_explicit_route_with_inventory(
+    config: &Config,
+    requested_model: &str,
+) -> Option<AutoRouteSelection> {
+    let requested_model = requested_model.trim();
+    if requested_model.is_empty() || requested_model.eq_ignore_ascii_case("auto") {
+        return None;
+    }
+
+    let inventory = ModelInventory::from_config(config);
+    let active_provider = config.api_provider();
+
+    if let Some(candidate) = inventory.candidates.iter().find(|candidate| {
+        candidate.provider == active_provider
+            && explicit_model_matches_candidate(candidate, requested_model)
+    }) {
+        return Some(AutoRouteSelection {
+            provider: candidate.provider,
+            model: candidate.model.clone(),
+            reasoning_effort: config.reasoning_effort().map(ReasoningEffort::from_setting),
+            source: AutoRouteSource::Heuristic,
+        });
+    }
+
+    let mut matches = inventory
+        .candidates
+        .iter()
+        .filter(|candidate| explicit_model_matches_candidate(candidate, requested_model));
+    let candidate = matches.next()?;
+    if matches.next().is_some() {
+        return None;
+    }
+
+    Some(AutoRouteSelection {
+        provider: candidate.provider,
+        model: candidate.model.clone(),
+        reasoning_effort: config.reasoning_effort().map(ReasoningEffort::from_setting),
+        source: AutoRouteSource::Heuristic,
+    })
+}
+
+pub(crate) fn explicit_route_candidate_providers(
+    config: &Config,
+    requested_model: &str,
+) -> Vec<ApiProvider> {
+    let requested_model = requested_model.trim();
+    if requested_model.is_empty() || requested_model.eq_ignore_ascii_case("auto") {
+        return Vec::new();
+    }
+
+    let inventory = ModelInventory::from_config(config);
+    let mut providers = Vec::new();
+    for candidate in inventory
+        .candidates
+        .iter()
+        .filter(|candidate| explicit_model_matches_candidate(candidate, requested_model))
+    {
+        if !providers.contains(&candidate.provider) {
+            providers.push(candidate.provider);
+        }
+    }
+    providers
+}
+
+fn explicit_model_matches_candidate(
+    candidate: &crate::model_inventory::ModelRouteCandidate,
+    requested_model: &str,
+) -> bool {
+    candidate.model.eq_ignore_ascii_case(requested_model)
+        || normalize_model_name_for_provider(candidate.provider, requested_model)
+            .is_some_and(|model| candidate.model.eq_ignore_ascii_case(&model))
 }
 
 fn auto_route_from_inventory_heuristic(

@@ -620,7 +620,7 @@ fn run() -> Result<()> {
         Some(Commands::Auth(args)) => run_auth_command(&mut store, args.command),
         Some(Commands::McpServer) => run_mcp_server_command(&mut store),
         Some(Commands::Config(args)) => run_config_command(&mut store, args.command),
-        Some(Commands::Model(args)) => run_model_command(args.command),
+        Some(Commands::Model(args)) => run_model_command(args.command, runtime_overrides.provider),
         Some(Commands::Thread(args)) => run_thread_command(args.command),
         Some(Commands::Sandbox(args)) => run_sandbox_command(args.command),
         Some(Commands::AppServer(args)) => run_app_server_command(args),
@@ -1467,11 +1467,23 @@ fn run_config_command(store: &mut ConfigStore, command: ConfigCommand) -> Result
     }
 }
 
-fn run_model_command(command: ModelCommand) -> Result<()> {
+fn model_command_provider_hint(
+    command_provider: Option<ProviderArg>,
+    top_level_provider: Option<ProviderKind>,
+) -> Option<ProviderKind> {
+    command_provider
+        .map(ProviderKind::from)
+        .or(top_level_provider)
+}
+
+fn run_model_command(
+    command: ModelCommand,
+    top_level_provider: Option<ProviderKind>,
+) -> Result<()> {
     let registry = ModelRegistry::default();
     match command {
         ModelCommand::List { provider } => {
-            let filter = provider.map(ProviderKind::from);
+            let filter = model_command_provider_hint(provider, top_level_provider);
             for model in registry.list().into_iter().filter(|m| match filter {
                 Some(p) => m.provider == p,
                 None => true,
@@ -1481,7 +1493,8 @@ fn run_model_command(command: ModelCommand) -> Result<()> {
             Ok(())
         }
         ModelCommand::Resolve { model, provider } => {
-            let resolved = registry.resolve(model.as_deref(), provider.map(ProviderKind::from));
+            let provider = model_command_provider_hint(provider, top_level_provider);
+            let resolved = registry.resolve(model.as_deref(), provider);
             println!("requested: {}", resolved.requested.unwrap_or_default());
             println!("resolved: {}", resolved.resolved.id);
             println!("provider: {}", resolved.resolved.provider.as_str());
@@ -2267,6 +2280,28 @@ mod tests {
                     provider: Some(ProviderArg::Deepseek)
                 }
             })) if model == "deepseek-v4-pro"
+        ));
+    }
+
+    #[test]
+    fn model_command_provider_hint_uses_subcommand_then_top_level_provider() {
+        assert_eq!(
+            model_command_provider_hint(None, Some(ProviderKind::Zai)),
+            Some(ProviderKind::Zai)
+        );
+        assert_eq!(
+            model_command_provider_hint(Some(ProviderArg::Minimax), Some(ProviderKind::Zai)),
+            Some(ProviderKind::Minimax)
+        );
+        assert_eq!(model_command_provider_hint(None, None), None);
+
+        let cli = parse_ok(&["codewhale", "--provider", "zai", "model", "list"]);
+        assert_eq!(cli.provider, Some(ProviderArg::Zai));
+        assert!(matches!(
+            cli.command,
+            Some(Commands::Model(ModelArgs {
+                command: ModelCommand::List { provider: None }
+            }))
         ));
     }
 
