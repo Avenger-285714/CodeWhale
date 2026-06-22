@@ -49,7 +49,7 @@ client.on("message", async (frame) => {
   try {
     await handleIncomingMessage(frame);
   } catch (error) {
-    console.error("Failed to handle WeCom message", error);
+    await reportHandlerError(frame, "Failed to handle WeCom message", error);
   }
 });
 
@@ -57,7 +57,7 @@ client.on("event", async (frame) => {
   try {
     await handleEvent(frame);
   } catch (error) {
-    console.error("Failed to handle WeCom event", error);
+    await reportHandlerError(frame, "Failed to handle WeCom event", error);
   }
 });
 
@@ -75,8 +75,25 @@ if (!config.allowlist.length && !config.allowUnlisted) {
 client.connect();
 
 function replyText(frame, text) {
-  const streamId = generateReqId("stream");
-  return client.replyStream(frame, streamId, text, true);
+  const chunks = splitMessage(text, config.maxReplyChars);
+  return chunks.reduce(
+    (chain, chunk) => chain.then(() => client.replyStream(frame, generateReqId("stream"), chunk, true)),
+    Promise.resolve()
+  );
+}
+
+async function reportHandlerError(frame, context, error) {
+  console.error(context, error);
+  try {
+    await replyText(frame, `${context}: ${publicBridgeError(error)}`);
+  } catch (replyError) {
+    console.error("Failed to report WeCom bridge error", replyError);
+  }
+}
+
+function publicBridgeError(error) {
+  const message = String(error?.message || error || "unknown error");
+  return message.replaceAll(config.runtimeToken, "<redacted>").slice(0, 500);
 }
 
 async function handleIncomingMessage(frame) {
@@ -252,7 +269,6 @@ async function streamTurnEvents(chatId, frame, threadId, turnId, sinceSeq) {
   const streamId = generateReqId("stream");
   let responseText = "";
   let latestSeq = sinceSeq;
-  let sentProgressAt = Date.now();
 
   try {
     const response = await fetch(
@@ -269,7 +285,13 @@ async function streamTurnEvents(chatId, frame, threadId, turnId, sinceSeq) {
 
     for await (const event of readSse(response)) {
       if (!event.data) continue;
-      const record = JSON.parse(event.data);
+      let record;
+      try {
+        record = JSON.parse(event.data);
+      } catch (error) {
+        console.warn("Skipping malformed runtime SSE event:", publicBridgeError(error));
+        continue;
+      }
       latestSeq = Math.max(latestSeq, Number(record.seq || 0));
       await threadStore.patchChat(chatId, { lastSeq: latestSeq });
 
@@ -301,15 +323,18 @@ async function streamTurnEvents(chatId, frame, threadId, turnId, sinceSeq) {
       if (record.event === "turn.completed") {
         const turn = record.payload?.turn || {};
         const status = turn.status || "completed";
-        const error = turn.error ? `\n${turn.error}` : "";
-        await client.replyStream(frame, streamId, responseText.trim() || "Turn completed.", true);
+        const errorText = turn.error ? `\n${turn.error}` : "";
+        const fallback = status === "completed" ? "Turn completed." : `Turn ${status}.${errorText}`;
+        await client.replyStream(frame, streamId, responseText.trim() || fallback, true);
         return;
       }
 
       if (record.event === "turn.lifecycle") {
-        const status = record.payload?.turn?.status || record.payload?.status;
+        const turn = record.payload?.turn || {};
+        const status = turn.status || record.payload?.status;
         if (["failed", "canceled", "interrupted"].includes(status)) {
-          await client.replyStream(frame, streamId, `Turn ${status}.`, true);
+          const errorText = turn.error || record.payload?.error;
+          await client.replyStream(frame, streamId, `Turn ${status}.${errorText ? `\n${errorText}` : ""}`, true);
           return;
         }
       }

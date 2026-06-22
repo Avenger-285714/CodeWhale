@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, chmod } from "node:fs/promises";
 import path from "node:path";
 
 export function parseList(raw) {
@@ -250,10 +250,21 @@ export class ThreadStore {
 
   async save() {
     const dir = path.dirname(this.filePath);
-    await mkdir(dir, { recursive: true });
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    await chmodBestEffort(dir, 0o700);
     const tmp = `${this.filePath}.tmp`;
-    await writeFile(tmp, `${JSON.stringify(this.data, null, 2)}\n`);
+    await writeFile(tmp, `${JSON.stringify(this.data, null, 2)}\n`, { mode: 0o600 });
+    await chmodBestEffort(tmp, 0o600);
     await rename(tmp, this.filePath);
+    await chmodBestEffort(this.filePath, 0o600);
+  }
+}
+
+async function chmodBestEffort(filePath, mode) {
+  try {
+    await chmod(filePath, mode);
+  } catch (error) {
+    if (process.platform !== "win32") throw error;
   }
 }
 
