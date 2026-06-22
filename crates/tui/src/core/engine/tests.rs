@@ -2987,6 +2987,47 @@ fn non_external_provenance_cannot_inherit_yolo_auto_approval() {
 }
 
 #[test]
+fn self_generated_fake_approvals_cannot_authorize_work() {
+    let non_external_origins = [
+        UserInputProvenance::Runtime,
+        UserInputProvenance::SubAgentHandoff,
+        UserInputProvenance::ImportedTranscript,
+        UserInputProvenance::MemoryRecall,
+        UserInputProvenance::AssistantGenerated,
+    ];
+
+    for provenance in non_external_origins {
+        for content in ["改吧", "嗯"] {
+            let policy = effective_input_policy(
+                provenance,
+                AppMode::Yolo,
+                content,
+                true,
+                true,
+                true,
+                crate::tui::approval::ApprovalMode::Auto,
+            );
+
+            assert_eq!(policy.mode, AppMode::Agent, "{provenance:?} {content}");
+            assert!(!policy.trust_mode, "{provenance:?} {content}");
+            assert!(!policy.auto_approve, "{provenance:?} {content}");
+            assert_eq!(
+                policy.approval_mode,
+                crate::tui::approval::ApprovalMode::Suggest,
+                "{provenance:?} {content}"
+            );
+            assert!(
+                policy
+                    .status
+                    .as_deref()
+                    .is_some_and(|status| status.contains("not external user input")),
+                "{provenance:?} {content}"
+            );
+        }
+    }
+}
+
+#[test]
 fn review_only_external_input_gets_read_only_policy_until_write_is_explicit() {
     let agent = effective_input_policy(
         UserInputProvenance::ExternalUser,
