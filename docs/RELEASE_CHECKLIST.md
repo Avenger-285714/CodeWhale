@@ -1,8 +1,8 @@
 # Release Checklist
 
 A pre-tag checklist that the v0.8.21/v0.8.22 CHANGELOG gap proved we needed.
-Step through this in order from a clean worktree on the release branch
-(`work/vX.Y.Z-...`). Treat any unchecked box as a release blocker.
+Step through this in order from a clean worktree on the final release source.
+Treat any unchecked box as a release blocker.
 
 For deeper context on the underlying tools (preflight scripts, npm smoke,
 publish-crates), see [`RELEASE_RUNBOOK.md`](RELEASE_RUNBOOK.md).
@@ -10,6 +10,29 @@ For larger milestone releases, add any version-specific acceptance matrix to
 the release branch before tagging; use it for provider routes, feature gates,
 GUI/runtime smoke, remote-workbench decisions, and credit hygiene that the
 generic checklist does not enumerate.
+
+## 0. Release source is frozen
+
+- [ ] The live milestone and PR queue no longer contain work intended for this
+      version:
+      ```
+      gh issue list --repo Hmbown/CodeWhale --milestone "vX.Y.Z" --state open
+      gh pr list --repo Hmbown/CodeWhale --state open --limit 100
+      ```
+- [ ] Any remaining same-theme work is explicitly retargeted to a later
+      version or called out as a known issue. Do not bump/tag while still
+      planning to merge more same-version fixes.
+- [ ] The release tag does not already point at an older source SHA, or the
+      maintainer has deliberately chosen to publish exactly that older SHA:
+      ```
+      git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
+      gh release view vX.Y.Z --repo Hmbown/CodeWhale
+      ./scripts/release/check-published.sh X.Y.Z
+      ```
+- [ ] If `vX.Y.Z` exists with no GitHub Release/packages and `main` has moved
+      on, stop. Choose one of: publish the existing tag as-is, bump the later
+      work to the next patch version, or explicitly approve deleting/recreating
+      the unpublished tag. Do not silently move tags during PR cleanup.
 
 ## 1. CHANGELOG entry exists for the version
 
@@ -144,8 +167,9 @@ release anxiety: contributors cannot tell whether their work merged.
       `git switch main && git fetch origin main && git merge --ff-only origin/main`
 - [ ] The release source is reachable from `main`:
       `./scripts/release/ensure-release-on-main.sh HEAD`
-- [ ] `git tag -s vX.Y.Z -m "vX.Y.Z"`
-- [ ] `git push origin vX.Y.Z`
+- [ ] Create `vX.Y.Z` from the final `main` SHA using the **Create release tag**
+      workflow, or create and push a signed local tag:
+      `git tag -s vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`
 - [ ] The `release.yml` workflow has built and uploaded artifacts to the
       GitHub release for this tag.
 - [ ] The live GitHub Release body has its own `## Contributors` or

@@ -18,9 +18,13 @@ reporter/user-facing items into v0.8.65 after the PR queue was cleared:
 `docs/V0865_REMAINING_AGENT_PROMPT.md` is the focused handoff prompt for the
 next agent.
 
-The release is not publicly shipped from this ledger alone. The latest public
-ship state still has to be verified at release time by Hunter before any tag,
-package publish, GitHub Release, or deploy.
+The release is not publicly shipped from this ledger alone. Live truth on
+2026-06-24: `refs/tags/v0.8.65` exists at `f1f79827128f28489eb852596d5f8df971370f29`,
+but there is no GitHub Release for `v0.8.65`, and `./scripts/release/check-published.sh 0.8.65`
+reports npm plus all `codewhale-*` crates unpublished. `origin/main` has moved
+past that tag. Do not claim a final `0.8.65` public candidate includes post-tag
+commits until Hunter chooses whether to publish the existing tag, retag the
+unpublished release anchor, or move the remaining work to the next patch.
 
 ## PR Queue
 
@@ -29,7 +33,9 @@ package publish, GitHub Release, or deploy.
 | #3559 | Merged | Harvested @cy2311's zh-Hans JSON extraction, completed current localization coverage, moved the visible details shortcut to bare `v`, added the AUTHOR_MAP entry required by the harvest gate, and removed the stale internal `AltV` message id. Merge: `a7285ea5a2743d28d0c4bb4154526d0e727ac2fe`. |
 | #3560 | Merged | Finished the remaining harness-profile split by moving built-in harness seeds and private matching helpers into `crates/config/src/harness.rs` while preserving crate-root exports. Merge: `ec29998cce511047f0a237f2be4d95e9c5108a05`. |
 | #3561 | Merged | Harvested shared `integrations/bridge-core` helpers, patched review findings, and verified bridge-core plus Telegram, Feishu, WeCom, and Weixin checks/tests locally. Merge: `ead5165d433a3422625f55e0934443b50faad165`. |
-| #3493 | Open ledger PR | This document plus the remaining-agent prompt. It is the only open v0.8.65 PR after the non-ledger PR closeout. |
+| #3493 | Merged | Release ledger and remaining-agent prompt landed on `main`. Merge: `370bc45f345030f6a11c441e2a2a45b16fb3f63c`. |
+| #3562 | Open draft | Passive MCP discovery for #3461 plus configured custom provider rows for #1519. CI was green when reviewed on 2026-06-24, but the release-source/tag decision should be resolved before merging more same-version work. |
+| #3563 | Open draft | Factual model reference database and read-only `/modeldb` label browser for #3205/#2300. This is a labeling slice only, not Fleet loadout-auto completion. |
 | #3549 | Merged/auto-associated through #3559 | GitHub marked the original contributor PR merged by the replacement merge commit; final evidence comment posted. |
 | #3506 | Closed by #3560 | Final evidence comment posted. |
 | #3432 | Merged/auto-associated through #3561 | GitHub marked the original draft PR merged by the replacement merge commit; final evidence comment posted. |
@@ -94,12 +100,14 @@ Moved out of v0.8.65:
 
 ## Required Closeout
 
-1. Use `docs/V0865_REMAINING_AGENT_PROMPT.md` to hand the four remaining
-   v0.8.65 issues to the next implementation agent.
-2. Merge #3493 when its docs-only checks are green if the handoff ledger is
-   useful on `main`.
-3. After #3461, #3205, #2300, and #1519 are merged or clearly resolved, update
-   this ledger again with the actual closeout evidence.
+1. Resolve the release-source mismatch before merging more same-version work:
+   `v0.8.65` is already tagged, but `main` has advanced and no public release
+   exists.
+2. Use `docs/V0865_REMAINING_AGENT_PROMPT.md` to hand the four remaining
+   v0.8.65 issues to the next implementation agent only after deciding whether
+   those issues remain in `0.8.65` or move to the next patch.
+3. After #3461, #3205, #2300, and #1519 are merged, retargeted, or clearly
+   resolved, update this ledger again with the actual closeout evidence.
 4. Hunter may perform the separate release-owner actions: final release
    verification, version/tag/package/GitHub Release/publish/deploy decisions.
 

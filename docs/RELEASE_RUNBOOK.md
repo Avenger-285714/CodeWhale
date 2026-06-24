@@ -38,6 +38,35 @@ Current packaging note:
   - leave `codewhaleBinaryVersion` pinned to the previously released Rust binaries
   - rerun `npm pack` smoke checks before `npm publish`
 
+## Release Source Timing
+
+Freeze the source before creating a public `vX.Y.Z` tag. The version bump is
+not the release; it is the last source-prep commit before the tag. Do not keep
+merging same-version feature/fix PRs after `vX.Y.Z` exists and assume the
+release workflow will pick them up. It will not: the tag is the release anchor.
+
+Before tagging, verify the live queue and existing anchors:
+
+```bash
+gh issue list --repo Hmbown/CodeWhale --milestone "vX.Y.Z" --state open
+gh pr list --repo Hmbown/CodeWhale --state open --limit 100
+git ls-remote origin refs/heads/main refs/tags/vX.Y.Z
+gh release view vX.Y.Z --repo Hmbown/CodeWhale
+./scripts/release/check-published.sh X.Y.Z
+```
+
+If a same-version tag already exists but there is no GitHub Release and nothing
+is published, stop and choose deliberately:
+
+- publish exactly the tagged SHA, leaving later commits for the next patch;
+- bump the later work to the next patch version and tag that later SHA; or
+- with explicit maintainer approval only, delete/recreate the unpublished tag
+  after confirming no package, GitHub Release, mirror, or installer consumer has
+  treated it as public.
+
+Do not delete, move, or recreate a release tag implicitly as part of ordinary
+PR merge or milestone cleanup work.
+
 ## Preflight
 
 Run these from the repository root before cutting a tag:
@@ -143,10 +172,9 @@ configured.
 
 Release commits must land on `main` before any `vX.Y.Z` tag is pushed. Do not
 tag a release-only branch. Open the release PR against `main`, let required
-review and CI finish, merge it, then tag the commit that is reachable from
-`main` or let `auto-tag.yml` create that tag after the version bump reaches
-`main`. This is what lets GitHub process `Closes #N` lines automatically and
-show the release PR as merged. The tag release workflow runs
+review and CI finish, merge it, then explicitly tag the final source commit
+that is reachable from `main`. This is what lets GitHub process `Closes #N`
+lines automatically and show the release PR as merged. The tag release workflow runs
 `scripts/release/ensure-release-on-main.sh` for tag pushes and manual dispatches,
 and fails branch-only release sources before assets are published.
 
@@ -156,10 +184,11 @@ and fails branch-only release sources before assets are published.
    install tags), refreshes the lockfile and generated files, and runs
    `check-versions.sh`.
 2. Run `./scripts/release/publish-crates.sh dry-run` locally; it must be clean.
-3. Merge the release PR into `main` before tagging. The normal path is to push
-   the version bump PR to `main` and let `auto-tag.yml` create `vX.Y.Z` from the
-   main commit; see the npm wrapper release section below for the
-   `RELEASE_TAG_PAT` requirement.
+3. Merge the release PR into `main` before tagging. After the same-version
+   queue is frozen and `main` is at the intended source SHA, create `vX.Y.Z`
+   from `main` with the manual **Create release tag** workflow or with a signed
+   local tag push from a developer machine. See the npm wrapper release section
+   below for the `RELEASE_TAG_PAT` / manual release dispatch caveat.
 4. Publish crates in this order with `./scripts/release/publish-crates.sh publish`:
    - `codewhale-mcp`
    - `codewhale-protocol`
@@ -208,7 +237,9 @@ on a workstation with `npm login` and an authenticator app.
 
 1. Set the npm package version in [npm/codewhale/package.json](../npm/codewhale/package.json) to match the workspace `Cargo.toml`. CI's version-drift guard will catch mismatches before tag.
 2. Set `codewhaleBinaryVersion` to the GitHub release tag that should supply binaries.
-3. Push the version bump to `main`. `auto-tag.yml` creates the matching `vX.Y.Z` tag, and `release.yml` builds the binary matrix and drafts the GitHub Release.
+3. Push the version bump to `main`. After the release source is frozen, create
+   the matching `vX.Y.Z` tag from `main`; `release.yml` then builds the binary
+   matrix and drafts the GitHub Release.
 4. **Wait for the GitHub Release to finalize** with all eight signed binaries plus `codewhale-artifacts-sha256.txt`. The npm `prepublishOnly` hook (`scripts/verify-release-assets.js`) requires every asset to be present.
 5. From a developer machine, publish the npm wrapper manually:
 
