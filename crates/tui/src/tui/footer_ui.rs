@@ -574,7 +574,7 @@ pub(crate) fn active_tool_status_label(app: &App) -> Option<String> {
     if active_foreground_shell_running(app) {
         parts.push("Ctrl+B shell".to_string());
     }
-    parts.push(key_shortcuts::tool_details_shortcut_hint_label().to_string());
+    parts.push(key_shortcuts::tool_details_shortcut_action_hint("details"));
     Some(parts.join(" \u{00B7} "))
 }
 

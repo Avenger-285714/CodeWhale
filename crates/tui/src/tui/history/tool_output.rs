@@ -370,7 +370,10 @@ fn render_preserved_output_mode(
             let omitted = idx.saturating_sub(prev + 1);
             if omitted > 0 {
                 lines.push(details_affordance_line(
-                    &format!("{omitted} lines omitted"),
+                    &format!(
+                        "{omitted} lines omitted; {}",
+                        crate::tui::key_shortcuts::tool_details_shortcut_action_hint("full output")
+                    ),
                     Style::default().fg(palette::TEXT_MUTED),
                 ));
             }

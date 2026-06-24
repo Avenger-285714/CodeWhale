@@ -70,7 +70,7 @@ use std::process::Command;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RenderMode {
     /// Live in-stream view: thinking is collapsed to a summary, tool output is
-    /// truncated with a "Alt+V for details" affordance.
+    /// truncated with a visible details-pager affordance.
     Live,
     /// Full transcript view: every line of reasoning and tool output is
     /// emitted, no caps, no affordance.
@@ -286,7 +286,7 @@ impl HistoryCell {
                 if lines.len() > 2 {
                     lines.truncate(2);
                     lines.push(details_affordance_line(
-                        "details hidden",
+                        &crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details"),
                         Style::default().fg(palette::TEXT_MUTED).italic(),
                     ));
                 }
@@ -297,7 +297,7 @@ impl HistoryCell {
                 if lines.len() > TOOL_CARD_SUMMARY_LINES {
                     lines.truncate(TOOL_CARD_SUMMARY_LINES);
                     lines.push(details_affordance_line(
-                        "details hidden",
+                        &crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details"),
                         Style::default().fg(palette::TEXT_MUTED).italic(),
                     ));
                 }
@@ -360,7 +360,7 @@ impl HistoryCell {
     }
 
     /// Render the cell in transcript mode: full content, no caps, no
-    /// "Alt+V for details" affordances.
+    /// visible details-pager affordances.
     ///
     /// Use this for full-detail pagers, clipboard exports, and any
     /// surface that wants the complete body rather than the live summary.
@@ -598,7 +598,7 @@ impl ToolCell {
     }
 
     /// Full-content rendering for the pager / clipboard. Tool output that
-    /// would be capped + suffixed with "Alt+V for details" in the live view
+    /// would be capped + suffixed with a details-pager hint in the live view
     /// is emitted in full here.
     pub fn transcript_lines(&self, width: u16) -> Vec<Line<'static>> {
         self.render(width, /*low_motion*/ false, RenderMode::Transcript)
@@ -1477,7 +1477,7 @@ fn render_command_mode(command: &str, width: u16, mode: RenderMode) -> Vec<Line<
     {
         if count >= cap {
             lines.push(details_affordance_line(
-                "command clipped",
+                &crate::tui::key_shortcuts::tool_details_shortcut_action_hint("full command"),
                 Style::default().fg(palette::TEXT_MUTED),
             ));
             break;

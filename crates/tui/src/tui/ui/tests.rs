@@ -2256,7 +2256,7 @@ fn active_tool_status_label_summarizes_live_tool_group() {
     assert!(label.contains("1 active"));
     assert!(label.contains("1 done"));
     assert!(label.contains(crate::tui::key_shortcuts::tool_details_shortcut_label()));
-    assert!(label.contains("/v"));
+    assert!(label.contains("opens details"));
 }
 
 #[test]
@@ -6835,9 +6835,9 @@ fn detail_target_prefers_visible_tool_card() {
 
     assert_eq!(detail_target_cell_index(&app), Some(1));
     let expected = format!(
-        "{} Activity: find · {} raw",
+        "{} Activity: find · {}",
         crate::tui::key_shortcuts::activity_shortcut_label(),
-        crate::tui::key_shortcuts::tool_details_shortcut_hint_label()
+        crate::tui::key_shortcuts::tool_details_shortcut_action_hint("raw details")
     );
     assert_eq!(
         selected_detail_footer_label(&app).as_deref(),
@@ -6890,9 +6890,9 @@ fn activity_footer_hint_uses_details_for_subagent_cards() {
     app.viewport.last_transcript_visible = 4;
 
     let expected = format!(
-        "{} Activity: sub-agent · {} details",
+        "{} Activity: sub-agent · {}",
         crate::tui::key_shortcuts::activity_shortcut_label(),
-        crate::tui::key_shortcuts::tool_details_shortcut_hint_label()
+        crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details")
     );
     assert_eq!(
         selected_detail_footer_label(&app).as_deref(),

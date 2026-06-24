@@ -1717,8 +1717,8 @@ fn shell_summary_for_sidebar(
 ) -> String {
     if status == ToolStatus::Failed && looks_like_pending_ci(command, output_summary, output) {
         return format!(
-            "Waiting for CI \u{00B7} {} details",
-            crate::tui::key_shortcuts::tool_details_shortcut_hint_label()
+            "Waiting for CI \u{00B7} {}",
+            crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details")
         );
     }
 
@@ -1764,10 +1764,7 @@ fn looks_like_pending_ci(
 }
 
 fn failure_summary_with_hint(summary: &str) -> String {
-    let hint = format!(
-        "inspect details with {}",
-        crate::tui::key_shortcuts::tool_details_shortcut_hint_label()
-    );
+    let hint = crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details");
     if summary.trim().is_empty() {
         hint
     } else if summary.contains(&hint) {
@@ -2008,8 +2005,8 @@ fn editorial_tool_rows(
             let command = row.name.clone();
             row.name = "Waiting for CI".to_string();
             row.summary = format!(
-                "{command} \u{00B7} {count} polls collapsed \u{00B7} {} details",
-                crate::tui::key_shortcuts::tool_details_shortcut_hint_label()
+                "{command} \u{00B7} {count} polls collapsed \u{00B7} {}",
+                crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details")
             );
             row.status = ToolStatus::Running;
         }
@@ -4727,10 +4724,9 @@ mod tests {
             "failed shell command should keep its concise label: {text:?}"
         );
         assert!(
-            text.iter().any(|line| line.contains(&format!(
-                "inspect details with {}",
-                crate::tui::key_shortcuts::tool_details_shortcut_hint_label()
-            ))),
+            text.iter().any(|line| line.contains(
+                &crate::tui::key_shortcuts::tool_details_shortcut_action_hint("details")
+            )),
             "failed row should include the next action: {text:?}"
         );
     }

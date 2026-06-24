@@ -11142,11 +11142,11 @@ pub(crate) fn selected_detail_footer_label(app: &App) -> Option<String> {
         let noun = if matches!(cell, HistoryCell::SubAgent(_)) {
             "details"
         } else {
-            "raw"
+            "raw details"
         };
         format!(
-            " · {} {noun}",
-            key_shortcuts::tool_details_shortcut_hint_label()
+            " · {}",
+            key_shortcuts::tool_details_shortcut_action_hint(noun)
         )
     } else {
         String::new()

@@ -211,11 +211,6 @@ pub const KEYBINDINGS: &[KeybindingEntry] = &[
         section: KeybindingSection::Submission,
     },
     KeybindingEntry {
-        chord: "v",
-        description_id: crate::localization::MessageId::KbSelectedDetails,
-        section: KeybindingSection::Submission,
-    },
-    KeybindingEntry {
         chord: "Alt+V",
         description_id: crate::localization::MessageId::KbToolDetailsPager,
         section: KeybindingSection::Submission,
@@ -367,6 +362,19 @@ mod tests {
             ctrl_x_tasks.description_id,
             crate::localization::MessageId::KbCancelBackgroundShellJobs
         );
+    }
+
+    #[test]
+    fn tool_details_help_documents_alt_v_without_bare_v() {
+        let details = KEYBINDINGS
+            .iter()
+            .filter(|entry| {
+                entry.description_id == crate::localization::MessageId::KbToolDetailsPager
+            })
+            .map(|entry| entry.chord)
+            .collect::<Vec<_>>();
+
+        assert_eq!(details, vec!["Alt+V"]);
     }
 
     #[test]

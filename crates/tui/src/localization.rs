@@ -431,7 +431,6 @@ pub enum MessageId {
     KbFuzzyFilePicker,
     KbCompactInspector,
     KbLastMessagePager,
-    KbSelectedDetails,
     KbToolDetailsPager,
     KbThinkingPager,
     KbLiveTranscript,
@@ -887,7 +886,6 @@ pub const ALL_MESSAGE_IDS: &[MessageId] = &[
     MessageId::KbFuzzyFilePicker,
     MessageId::KbCompactInspector,
     MessageId::KbLastMessagePager,
-    MessageId::KbSelectedDetails,
     MessageId::KbToolDetailsPager,
     MessageId::KbThinkingPager,
     MessageId::KbLiveTranscript,
@@ -1603,9 +1601,6 @@ fn english(id: MessageId) -> &'static str {
         MessageId::KbFuzzyFilePicker => "Open the fuzzy file picker (insert @path on Enter)",
         MessageId::KbCompactInspector => "Open compact session context inspector",
         MessageId::KbLastMessagePager => "Open pager for the last message (when input is empty)",
-        MessageId::KbSelectedDetails => {
-            "Open details for the selected tool or message (when input is empty)"
-        }
         MessageId::KbToolDetailsPager => "Open tool-details pager",
         MessageId::KbThinkingPager => "Open Activity Detail",
         MessageId::KbLiveTranscript => "Open live transcript overlay (sticky-tail auto-scroll)",
@@ -1847,9 +1842,7 @@ fn english(id: MessageId) -> &'static str {
         MessageId::CtxInspNoSystemPrompt => "No system prompt set.",
         MessageId::CtxInspNoReferences => "No file, directory, or media references recorded yet.",
         MessageId::CtxInspNoToolActivity => "No tool activity recorded yet.",
-        MessageId::CtxInspAltVHint => {
-            "Open the matching card and press Alt+V (or v) for full details."
-        }
+        MessageId::CtxInspAltVHint => "Open the matching card and press Alt+V for full details.",
         MessageId::CtxInspCells => "cells",
         MessageId::CtxInspApiMessages => "API messages",
         MessageId::CtxInspActive => "active",
@@ -2249,9 +2242,6 @@ fn vietnamese(id: MessageId) -> Option<&'static str> {
         MessageId::KbLastMessagePager => {
             "Mở trang xem cho tin nhắn cuối cùng (khi khung nhập trống)"
         }
-        MessageId::KbSelectedDetails => {
-            "Mở chi tiết cho công cụ hoặc tin nhắn được chọn (khi khung nhập trống)"
-        }
         MessageId::KbToolDetailsPager => "Mở trang xem chi tiết công cụ",
         MessageId::KbThinkingPager => "Mở Chi Tiết Hoạt Động (Activity Detail)",
         MessageId::KbLiveTranscript => "Mở lớp phủ bản ghi trực tiếp (tự động cuộn theo đuôi)",
@@ -2502,7 +2492,7 @@ fn vietnamese(id: MessageId) -> Option<&'static str> {
         MessageId::CtxInspNoSystemPrompt => "Chưa có lời nhắc hệ thống.",
         MessageId::CtxInspNoReferences => "Chưa có tham chiếu tệp, thư mục hoặc phương tiện nào.",
         MessageId::CtxInspNoToolActivity => "Chưa có hoạt động công cụ nào.",
-        MessageId::CtxInspAltVHint => "Mở thẻ phù hợp và nhấn Alt+V (hoặc v) để biết chi tiết.",
+        MessageId::CtxInspAltVHint => "Mở thẻ phù hợp và nhấn Alt+V để biết chi tiết.",
         MessageId::CtxInspCells => "ô",
         MessageId::CtxInspApiMessages => "tin nhắn API",
         MessageId::CtxInspActive => "đang hoạt động",
@@ -2671,7 +2661,7 @@ fn traditional_chinese(id: MessageId) -> Option<&'static str> {
         MessageId::CtxInspNoSystemPrompt => "未設定系統提示。",
         MessageId::CtxInspNoReferences => "尚未記錄任何檔案、目錄或媒體引用。",
         MessageId::CtxInspNoToolActivity => "尚未記錄任何工具活動。",
-        MessageId::CtxInspAltVHint => "開啟對應的卡片並按 Alt+V（或 v）檢視詳細資訊。",
+        MessageId::CtxInspAltVHint => "開啟對應的卡片並按 Alt+V 檢視詳細資訊。",
         MessageId::CtxInspCells => "儲存格",
         MessageId::CtxInspApiMessages => "API 訊息",
         MessageId::CtxInspActive => "作用中",
@@ -3068,9 +3058,6 @@ fn japanese(id: MessageId) -> Option<&'static str> {
         MessageId::KbFuzzyFilePicker => "ファジーファイルピッカーを開く（Enter で @path を挿入）",
         MessageId::KbCompactInspector => "コンパクトなセッションコンテキスト検査ツールを開く",
         MessageId::KbLastMessagePager => "最後のメッセージのページャーを開く（入力が空の時）",
-        MessageId::KbSelectedDetails => {
-            "選択中のツールまたはメッセージの詳細を開く（入力が空の時）"
-        }
         MessageId::KbToolDetailsPager => "ツール詳細のページャーを開く",
         MessageId::KbThinkingPager => "Activity Detail を開く",
         MessageId::KbLiveTranscript => "ライブ会話履歴オーバーレイを開く（自動追尾スクロール）",
@@ -3315,9 +3302,7 @@ fn japanese(id: MessageId) -> Option<&'static str> {
             "ファイル、ディレクトリ、メディアの参照はまだ記録されていません。"
         }
         MessageId::CtxInspNoToolActivity => "ツールアクティビティはまだ記録されていません。",
-        MessageId::CtxInspAltVHint => {
-            "該当するカードを開き、Alt+V（または v）を押すと詳細が表示されます。"
-        }
+        MessageId::CtxInspAltVHint => "該当するカードを開き、Alt+V を押すと詳細が表示されます。",
         MessageId::CtxInspCells => "セル",
         MessageId::CtxInspApiMessages => "API メッセージ",
         MessageId::CtxInspActive => "アクティブ",
@@ -3648,7 +3633,6 @@ fn chinese_simplified(id: MessageId) -> Option<&'static str> {
         MessageId::KbFuzzyFilePicker => "打开模糊文件选择器（按 Enter 插入 @path）",
         MessageId::KbCompactInspector => "打开紧凑会话上下文检查器",
         MessageId::KbLastMessagePager => "打开最后一条消息的分页器（输入框为空时）",
-        MessageId::KbSelectedDetails => "打开选中工具或消息的详情（输入框为空时）",
         MessageId::KbToolDetailsPager => "打开工具详情分页器",
         MessageId::KbThinkingPager => "打开 Activity Detail",
         MessageId::KbLiveTranscript => "打开实时对话覆盖层（自动滚动尾随）",
@@ -3865,7 +3849,7 @@ fn chinese_simplified(id: MessageId) -> Option<&'static str> {
         MessageId::CtxInspNoSystemPrompt => "未设置系统提示。",
         MessageId::CtxInspNoReferences => "尚未记录任何文件、目录或媒体引用。",
         MessageId::CtxInspNoToolActivity => "尚未记录任何工具活动。",
-        MessageId::CtxInspAltVHint => "打开对应的卡片并按 Alt+V（或 v）查看详细信息。",
+        MessageId::CtxInspAltVHint => "打开对应的卡片并按 Alt+V 查看详细信息。",
         MessageId::CtxInspCells => "单元格",
         MessageId::CtxInspApiMessages => "API 消息",
         MessageId::CtxInspActive => "活动中",
@@ -4246,9 +4230,6 @@ fn portuguese_brazil(id: MessageId) -> Option<&'static str> {
         MessageId::KbLastMessagePager => {
             "Abrir paginador para última mensagem (quando entrada vazia)"
         }
-        MessageId::KbSelectedDetails => {
-            "Abrir detalhes da ferramenta ou mensagem selecionada (quando entrada vazia)"
-        }
         MessageId::KbToolDetailsPager => "Abrir paginador de detalhes da ferramenta",
         MessageId::KbThinkingPager => "Abrir Activity Detail",
         MessageId::KbLiveTranscript => "Abrir sobreposição de transcrição ao vivo (auto-scroll)",
@@ -4500,7 +4481,7 @@ fn portuguese_brazil(id: MessageId) -> Option<&'static str> {
         }
         MessageId::CtxInspNoToolActivity => "Nenhuma atividade de ferramenta registrada ainda.",
         MessageId::CtxInspAltVHint => {
-            "Abra o cartão correspondente e pressione Alt+V (ou v) para detalhes completos."
+            "Abra o cartão correspondente e pressione Alt+V para detalhes completos."
         }
         MessageId::CtxInspCells => "células",
         MessageId::CtxInspApiMessages => "mensagens da API",
@@ -4896,9 +4877,6 @@ fn spanish_latin_america(id: MessageId) -> Option<&'static str> {
         MessageId::KbLastMessagePager => {
             "Abrir paginador para el último mensaje (cuando la entrada está vacía)"
         }
-        MessageId::KbSelectedDetails => {
-            "Abrir detalles de la herramienta o mensaje seleccionado (cuando la entrada está vacía)"
-        }
         MessageId::KbToolDetailsPager => "Abrir paginador de detalles de la herramienta",
         MessageId::KbThinkingPager => "Abrir paginador de razonamiento",
         MessageId::KbLiveTranscript => "Abrir superposición de transcripción en vivo (auto-scroll)",
@@ -5148,7 +5126,7 @@ fn spanish_latin_america(id: MessageId) -> Option<&'static str> {
         }
         MessageId::CtxInspNoToolActivity => "Aún no se ha registrado actividad de herramientas.",
         MessageId::CtxInspAltVHint => {
-            "Abra la tarjeta correspondiente y presione Alt+V (o v) para ver los detalles completos."
+            "Abra la tarjeta correspondiente y presione Alt+V para ver los detalles completos."
         }
         MessageId::CtxInspCells => "celdas",
         MessageId::CtxInspApiMessages => "mensajes de API",
