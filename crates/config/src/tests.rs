@@ -4650,6 +4650,7 @@ fn fleet_profile_explicit_config_parses_role_loadout_permissions() {
 [fleet.profiles.verifier]
 slot = "verifier"
 loadout = "review"
+model = "deepseek-v4-pro"
 
 [fleet.profiles.verifier.role]
 name = "verifier"
@@ -4687,6 +4688,7 @@ concurrency = 3
         Some("Check the patch and report evidence.")
     );
     assert_eq!(profile.loadout, FleetLoadout::Review);
+    assert_eq!(profile.model.as_deref(), Some("deepseek-v4-pro"));
     assert!(!profile.permissions.allow_shell);
     assert!(!profile.permissions.trust);
     assert!(profile.permissions.approval_required);

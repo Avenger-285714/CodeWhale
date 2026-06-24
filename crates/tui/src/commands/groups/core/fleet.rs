@@ -20,8 +20,22 @@ impl RegisterCommand for FleetCmd {
         &COMMAND_INFO
     }
 
-    fn execute(_app: &mut App, _arg: Option<&str>) -> CommandResult {
-        CommandResult::action(AppAction::OpenFleetSetup)
+    fn execute(app: &mut App, arg: Option<&str>) -> CommandResult {
+        match arg.map(str::trim).filter(|arg| !arg.is_empty()) {
+            None
+            | Some("setup" | "roles" | "role" | "profiles" | "profile" | "party" | "loadout") => {
+                CommandResult::action(AppAction::OpenFleetSetup)
+            }
+            Some("status" | "workers" | "worker" | "agents" | "subagents" | "list") => {
+                super::core::subagents(app)
+            }
+            Some("help" | "?") => CommandResult::message(
+                "Usage: /fleet [setup|status]\n\n/fleet opens the setup flow. /fleet status shows Fleet worker status; /subagents is a compatibility shortcut for the same status view.",
+            ),
+            Some(other) => CommandResult::error(format!(
+                "Unknown /fleet target '{other}'. Use `/fleet setup` or `/fleet status`."
+            )),
+        }
     }
 }
 
@@ -65,6 +79,50 @@ mod tests {
 
         assert_eq!(result.action, Some(AppAction::OpenFleetSetup));
         assert!(result.message.is_none());
+    }
+
+    #[test]
+    fn fleet_status_arg_opens_worker_status_view() {
+        for arg in ["status", "workers", "worker", "agents", "subagents", "list"] {
+            let mut app = test_app();
+
+            let result = FleetCmd::execute(&mut app, Some(arg));
+
+            assert_eq!(result.action, Some(AppAction::ListSubAgents), "{arg}");
+            assert!(result.message.is_none(), "{arg}");
+        }
+    }
+
+    #[test]
+    fn fleet_help_arg_returns_usage() {
+        let mut app = test_app();
+
+        let result = FleetCmd::execute(&mut app, Some("help"));
+
+        assert!(!result.is_error);
+        assert!(result.action.is_none());
+        assert!(
+            result
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("/fleet status"))
+        );
+    }
+
+    #[test]
+    fn fleet_unknown_arg_reports_error() {
+        let mut app = test_app();
+
+        let result = FleetCmd::execute(&mut app, Some("bogus"));
+
+        assert!(result.is_error);
+        assert!(result.action.is_none());
+        assert!(
+            result
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("Unknown /fleet target 'bogus'"))
+        );
     }
 
     #[test]

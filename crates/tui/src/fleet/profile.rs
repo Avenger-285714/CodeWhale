@@ -47,6 +47,8 @@ struct AgentProfileToml {
     route_tier: Option<String>,
     #[serde(default)]
     loadout: Option<String>,
+    #[serde(default, alias = "model_hint", alias = "model_id")]
+    model: Option<String>,
     #[serde(default)]
     instructions: Option<AgentProfileInstructions>,
     #[serde(default)]
@@ -151,6 +153,8 @@ fn agent_profile_from_toml(path: &Path, parsed: AgentProfileToml) -> Result<Agen
     ])
     .map(FleetLoadout::from_name)
     .unwrap_or_default();
+    let model = non_empty_trimmed(parsed.model.as_deref()).map(str::to_string);
+    validate_agent_profile_model_hint(path, model.as_deref())?;
 
     let instructions = parsed
         .instructions
@@ -168,6 +172,7 @@ fn agent_profile_from_toml(path: &Path, parsed: AgentProfileToml) -> Result<Agen
             instructions,
         },
         loadout,
+        model,
         permissions: FleetProfilePermissions::default(),
         delegation: FleetDelegationHints::default(),
     };
@@ -236,8 +241,30 @@ fn validate_agent_profile_token(path: &Path, field: &str, value: &str) -> Result
     Ok(())
 }
 
+fn validate_agent_profile_model_hint(path: &Path, value: Option<&str>) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    if !is_model_hint(value) {
+        bail!(
+            "agent profile {} model must be a visible model id without whitespace or secrets",
+            path.display()
+        );
+    }
+    Ok(())
+}
+
 fn is_agent_profile_token_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')
+}
+
+fn is_model_hint(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && trimmed == value
+        && trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_graphic() && !matches!(ch, '=' | '\'' | '"'))
 }
 
 fn first_present<'a>(values: impl IntoIterator<Item = Option<&'a str>>) -> Option<&'a str> {
@@ -325,12 +352,14 @@ concurrency = 2
             r#"
 role = "scout"
 loadout = "fast"
+model = "deepseek-v4-flash"
 "#,
         )
         .expect("compact fleet profile parses");
 
         assert_eq!(profile.role.name, "scout");
         assert_eq!(profile.loadout, FleetLoadout::Fast);
+        assert_eq!(profile.model.as_deref(), Some("deepseek-v4-flash"));
         assert_eq!(profile.permissions, FleetProfilePermissions::default());
     }
 
@@ -357,6 +386,7 @@ display_name = "Adversarial Reviewer"
 description = "Skeptical read-only review posture"
 role_hint = "reviewer"
 model_class_hint = "balanced"
+model = "deepseek-v4-pro"
 
 [instructions]
 text = "Focus on regressions, missing tests, and fragile assumptions."
@@ -386,6 +416,7 @@ posture = "read-only"
             Some("Focus on regressions, missing tests, and fragile assumptions.")
         );
         assert_eq!(profile.profile.loadout, FleetLoadout::Balanced);
+        assert_eq!(profile.profile.model.as_deref(), Some("deepseek-v4-pro"));
         assert_eq!(
             profile.profile.permissions,
             FleetProfilePermissions::default()
@@ -436,6 +467,28 @@ posture = "read-write"
 
         assert!(
             err.contains("would widen permissions"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn agent_profile_loader_rejects_secret_like_model_hint() {
+        let tmp = TempDir::new().unwrap();
+        write_profile(
+            tmp.path(),
+            "reviewer.toml",
+            r#"
+name = "reviewer"
+model = "deepseek-v4-pro api_key=secret"
+"#,
+        );
+
+        let err = load_agent_profiles_from_dir(tmp.path())
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("model must be a visible model id"),
             "unexpected error: {err}"
         );
     }

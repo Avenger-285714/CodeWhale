@@ -127,6 +127,13 @@ pub struct FleetTaskWorkerProfile {
     /// Fleet model class hint such as `strong`, `balanced`, or `fast`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_class: Option<String>,
+    /// Optional explicit model id for this worker.
+    ///
+    /// Task-level model overrides are visible authoring data and take
+    /// precedence over the referenced agent profile's model hint. Provider and
+    /// wire-model validation still belong to route resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_profile: Option<String>,
     #[serde(default)]
@@ -896,6 +903,7 @@ mod tests {
                     role: Some("release-checker".to_string()),
                     loadout: None,
                     model_class: None,
+                    model: None,
                     tool_profile: Some("read-only".to_string()),
                     tools: vec!["cargo".to_string()],
                     capabilities: vec!["rust".to_string()],
@@ -957,6 +965,7 @@ mod tests {
             "role": "reviewer",
             "loadout": "auto",
             "model_class": "balanced",
+            "model": "deepseek-v4-pro",
             "tool_profile": "read-only",
             "tools": ["read_file"],
             "capabilities": ["rust"]
@@ -971,10 +980,12 @@ mod tests {
         assert_eq!(profile.role.as_deref(), Some("reviewer"));
         assert_eq!(profile.loadout.as_deref(), Some("auto"));
         assert_eq!(profile.model_class.as_deref(), Some("balanced"));
+        assert_eq!(profile.model.as_deref(), Some("deepseek-v4-pro"));
         assert_eq!(profile.tool_profile.as_deref(), Some("read-only"));
 
         let serialized = serde_json::to_value(&profile).unwrap();
         assert_eq!(serialized["agent_profile"], "adversarial_reviewer");
+        assert_eq!(serialized["model"], "deepseek-v4-pro");
         assert!(serialized.get("profile").is_none());
     }
 

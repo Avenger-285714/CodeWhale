@@ -145,6 +145,7 @@ fn validate_worker_profile(task_id: &str, worker: Option<&FleetTaskWorkerProfile
     )?;
     validate_worker_token(task_id, "worker.loadout", worker.loadout.as_deref())?;
     validate_worker_token(task_id, "worker.model_class", worker.model_class.as_deref())?;
+    validate_worker_model(task_id, worker.model.as_deref())?;
     Ok(())
 }
 
@@ -166,6 +167,26 @@ fn validate_worker_token(task_id: &str, field: &str, value: Option<&str>) -> Res
 
 fn is_worker_token_char(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.')
+}
+
+fn validate_worker_model(task_id: &str, value: Option<&str>) -> Result<()> {
+    let Some(value) = value else {
+        return Ok(());
+    };
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("fleet task {task_id} worker.model cannot be empty");
+    }
+    if trimmed != value
+        || !trimmed
+            .chars()
+            .all(|ch| ch.is_ascii_graphic() && !matches!(ch, '=' | '\'' | '"'))
+    {
+        bail!(
+            "fleet task {task_id} worker.model must be a visible model id without whitespace or secrets"
+        );
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -592,6 +613,7 @@ mod tests {
                 role: Some("reviewer".to_string()),
                 loadout: None,
                 model_class: None,
+                model: None,
                 tool_profile: Some("read-only".to_string()),
                 tools: vec!["git".to_string()],
                 capabilities: vec!["rust".to_string()],
@@ -666,6 +688,7 @@ mod tests {
                     "role": "reviewer",
                     "loadout": "auto",
                     "model_class": "balanced",
+                    "model": "deepseek-v4-pro",
                     "tool_profile": "read-only",
                     "tools": ["read_file", "grep_files"],
                     "capabilities": ["rust"]
@@ -684,6 +707,7 @@ mod tests {
         assert_eq!(worker.role.as_deref(), Some("reviewer"));
         assert_eq!(worker.loadout.as_deref(), Some("auto"));
         assert_eq!(worker.model_class.as_deref(), Some("balanced"));
+        assert_eq!(worker.model.as_deref(), Some("deepseek-v4-pro"));
         assert_eq!(worker.tool_profile.as_deref(), Some("read-only"));
     }
 
@@ -699,7 +723,8 @@ mod tests {
                 "worker": {
                     "profile": "../secrets",
                     "loadout": "openrouter/deepseek",
-                    "model_class": ""
+                    "model_class": "",
+                    "model": "deepseek/deepseek-v4-pro"
                 }
             }]
         });
@@ -709,6 +734,30 @@ mod tests {
 
         assert!(
             err.contains("worker.agent_profile must be a simple token"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn fleet_task_spec_rejects_secret_like_worker_model() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("unsafe-worker-model.json");
+        let doc = json!({
+            "tasks": [{
+                "id": "review",
+                "name": "review",
+                "instructions": "review the patch",
+                "worker": {
+                    "model": "deepseek-v4-pro api_key=secret"
+                }
+            }]
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&doc).unwrap()).unwrap();
+
+        let err = load_task_spec_document(&path).unwrap_err().to_string();
+
+        assert!(
+            err.contains("worker.model must be a visible model id"),
             "unexpected error: {err}"
         );
     }

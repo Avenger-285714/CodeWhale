@@ -1060,6 +1060,7 @@ async fn fleet_status_runtime_api_exposes_state_and_actions() -> Result<()> {
             role: Some("status-reviewer".to_string()),
             loadout: None,
             model_class: None,
+            model: None,
             tool_profile: Some("read-only".to_string()),
             tools: vec!["rg".to_string()],
             capabilities: vec!["fleet".to_string()],

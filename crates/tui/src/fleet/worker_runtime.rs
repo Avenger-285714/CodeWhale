@@ -129,10 +129,11 @@ pub fn fleet_task_to_worker_spec_with_profiles(
     let objective = fleet_task_prompt_with_profile(task_spec, agent_profile);
     let max_spawn_depth = codewhale_config::FleetExecConfig::default().max_spawn_depth;
     let loadout = effective_fleet_loadout(worker_profile, agent_profile);
+    let effective_model = effective_fleet_model(model, worker_profile, agent_profile);
     let mut requested_runtime = fleet_worker_runtime_profile_for_loadout(
         &agent_type,
         &tool_profile,
-        model,
+        &effective_model,
         0,
         max_spawn_depth,
         &loadout,
@@ -154,7 +155,7 @@ pub fn fleet_task_to_worker_spec_with_profiles(
         objective,
         role,
         agent_type,
-        model: model.to_string(),
+        model: effective_model,
         workspace: workspace.to_path_buf(),
         git_branch: None,
         context_mode: "fresh".to_string(),
@@ -293,6 +294,23 @@ fn effective_fleet_loadout(
         .unwrap_or_default()
 }
 
+fn effective_fleet_model(
+    run_model: &str,
+    worker_profile: Option<&FleetTaskWorkerProfile>,
+    agent_profile: Option<&AgentProfile>,
+) -> String {
+    worker_profile
+        .and_then(|worker| worker.model.as_deref())
+        .and_then(non_empty_trimmed)
+        .or_else(|| {
+            agent_profile
+                .and_then(|profile| profile.profile.model.as_deref())
+                .and_then(non_empty_trimmed)
+        })
+        .unwrap_or(run_model)
+        .to_string()
+}
+
 /// Map a fleet role name to a `SubAgentType`. Unknown roles default to `General`.
 fn fleet_role_to_agent_type(role: Option<&str>) -> SubAgentType {
     match role {
@@ -359,6 +377,11 @@ fn fleet_worker_runtime_profile_for_loadout(
     );
     profile.model = fleet_model_route_for_loadout(model, loadout);
     profile
+}
+
+fn non_empty_trimmed(value: &str) -> Option<&str> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then_some(trimmed)
 }
 
 fn fleet_model_route_for_loadout(
@@ -555,6 +578,7 @@ mod tests {
         role: Option<&str>,
         loadout: Option<&str>,
         model_class: Option<&str>,
+        model: Option<&str>,
         tools: Vec<&str>,
     ) -> FleetTaskWorkerProfile {
         FleetTaskWorkerProfile {
@@ -562,6 +586,7 @@ mod tests {
             role: role.map(str::to_string),
             loadout: loadout.map(str::to_string),
             model_class: model_class.map(str::to_string),
+            model: model.map(str::to_string),
             tool_profile: None,
             tools: tools.into_iter().map(str::to_string).collect(),
             capabilities: Vec::new(),
@@ -586,6 +611,7 @@ mod tests {
                     instructions: instructions.map(str::to_string),
                 },
                 loadout,
+                model: None,
                 permissions: codewhale_config::FleetProfilePermissions::default(),
                 delegation: codewhale_config::FleetDelegationHints::default(),
             },
@@ -645,6 +671,7 @@ mod tests {
             role: None,
             loadout: None,
             model_class: None,
+            model: None,
             tool_profile: None,
             tools: vec![],
             capabilities: vec![],
@@ -662,6 +689,7 @@ mod tests {
             role: None,
             loadout: None,
             model_class: None,
+            model: None,
             tool_profile: None,
             tools: vec!["cargo".to_string(), "git".to_string()],
             capabilities: vec![],
@@ -713,7 +741,14 @@ mod tests {
         );
         let task = fleet_task(
             "review",
-            Some(worker_profile(Some("reviewer"), None, None, None, vec![])),
+            Some(worker_profile(
+                Some("reviewer"),
+                None,
+                None,
+                None,
+                None,
+                vec![],
+            )),
         );
         let worker = FleetWorkerSpec {
             id: "worker-1".to_string(),
@@ -752,7 +787,14 @@ mod tests {
     fn fleet_worker_spec_rejects_unknown_agent_profile_before_spawn() {
         let task = fleet_task(
             "review",
-            Some(worker_profile(Some("missing"), None, None, None, vec![])),
+            Some(worker_profile(
+                Some("missing"),
+                None,
+                None,
+                None,
+                None,
+                vec![],
+            )),
         );
 
         let err = validate_task_agent_profiles(&[task], &[])
@@ -765,6 +807,82 @@ mod tests {
     }
 
     #[test]
+    fn fleet_worker_spec_uses_profile_model_and_task_model_precedence() {
+        let mut profile = agent_profile(
+            "reviewer",
+            "reviewer",
+            Some("Focus on regressions and missing tests."),
+            codewhale_config::FleetLoadout::Balanced,
+        );
+        profile.profile.model = Some("glm-5.2".to_string());
+        let worker = FleetWorkerSpec {
+            id: "worker-1".to_string(),
+            name: "Worker".to_string(),
+            host: FleetHostSpec::Local,
+            trust_level: None,
+            labels: Default::default(),
+            capabilities: vec![],
+            max_concurrent_tasks: None,
+        };
+
+        let profile_model_spec = fleet_task_to_worker_spec_with_profiles(
+            "worker-1",
+            "run-1",
+            &fleet_task(
+                "review",
+                Some(worker_profile(
+                    Some("reviewer"),
+                    None,
+                    None,
+                    None,
+                    None,
+                    vec![],
+                )),
+            ),
+            &worker,
+            "auto",
+            std::path::Path::new("/tmp"),
+            &[profile.clone()],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(profile_model_spec.model, "glm-5.2");
+        assert_eq!(
+            profile_model_spec.runtime_profile.model,
+            ModelRoute::Fixed("glm-5.2".to_string())
+        );
+
+        let task_model_spec = fleet_task_to_worker_spec_with_profiles(
+            "worker-2",
+            "run-1",
+            &fleet_task(
+                "review",
+                Some(worker_profile(
+                    Some("reviewer"),
+                    None,
+                    None,
+                    None,
+                    Some("deepseek-v4-pro"),
+                    vec![],
+                )),
+            ),
+            &worker,
+            "auto",
+            std::path::Path::new("/tmp"),
+            &[profile],
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(task_model_spec.model, "deepseek-v4-pro");
+        assert_eq!(
+            task_model_spec.runtime_profile.model,
+            ModelRoute::Fixed("deepseek-v4-pro".to_string())
+        );
+    }
+
+    #[test]
     fn fleet_worker_spec_intersects_task_tools_with_parent_runtime_profile() {
         let task = fleet_task(
             "build",
@@ -773,6 +891,7 @@ mod tests {
                 Some("builder"),
                 None,
                 Some("fast"),
+                None,
                 vec!["read_file", "apply_patch"],
             )),
         );
@@ -937,6 +1056,7 @@ mod tests {
                     role: Some(role.to_string()),
                     loadout: None,
                     model_class: None,
+                    model: None,
                     tool_profile: None,
                     tools: match &expected_tools {
                         AgentWorkerToolProfile::Explicit(tools) => tools.clone(),

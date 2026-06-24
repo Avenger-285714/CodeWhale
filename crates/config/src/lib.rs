@@ -1072,6 +1072,12 @@ pub struct FleetProfile {
     /// Model class / route-role hint. This is data only in this slice.
     #[serde(default)]
     pub loadout: FleetLoadout,
+    /// Optional explicit model id for this profile on the active/resolved route.
+    ///
+    /// This is not an auth or endpoint selector. Provider-scoped routing still
+    /// validates the executable provider/model/wire-model decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Permission defaults requested by the profile.
     #[serde(default)]
     pub permissions: FleetProfilePermissions,
