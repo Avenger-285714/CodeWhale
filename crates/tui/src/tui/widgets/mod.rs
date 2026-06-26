@@ -1189,9 +1189,9 @@ const APPROVAL_CARD_MIN_HEIGHT: u16 = 18;
 /// Minimum card width — anything tighter makes approval copy wrap too
 /// aggressively on small terminals.
 const APPROVAL_CARD_MIN_WIDTH: u16 = 40;
-/// Maximum card height — taller cards stop reading like a focused
-/// takeover and waste vertical space on large terminals.
-const APPROVAL_CARD_MAX_HEIGHT: u16 = 28;
+/// Maximum card height — tall enough for approval controls plus save-rule
+/// previews, while still reading like a focused takeover on large terminals.
+const APPROVAL_CARD_MAX_HEIGHT: u16 = 32;
 /// Maximum card width — readability craters past this on wide terminals.
 const APPROVAL_CARD_MAX_WIDTH: u16 = 96;
 
@@ -1391,6 +1391,16 @@ impl Renderable for ApprovalWidget<'_> {
             );
         } else {
             lines.push(Line::from(""));
+
+            if let Some(preview) = self.request.ask_rule_save_preview() {
+                push_ask_rule_save_preview(
+                    &mut lines,
+                    &preview,
+                    palette_colors.shortcut,
+                    card_area.width,
+                );
+                lines.push(Line::from(""));
+            }
 
             let options = approval_options_for(risk, locale);
 
@@ -1658,6 +1668,39 @@ fn push_params_detail_line(
             Style::default().fg(palette::TEXT_SECONDARY),
         ),
     ]));
+}
+
+fn push_ask_rule_save_preview(
+    lines: &mut Vec<Line<'static>>,
+    preview: &crate::tui::approval::AskRuleSavePreview,
+    shortcut: Color,
+    card_width: u16,
+) {
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            "Save:   ",
+            Style::default().fg(shortcut).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(preview.summary(), Style::default().fg(palette::TEXT_BODY)),
+    ]));
+
+    let entry_width = card_width.saturating_sub(10) as usize;
+    let entries = preview.entries.join("; ");
+    let truncated = crate::utils::truncate_with_ellipsis(&entries, entry_width.max(20), "...");
+    lines.push(Line::from(vec![
+        Span::raw("    "),
+        Span::styled(truncated, Style::default().fg(palette::TEXT_SECONDARY)),
+    ]));
+    if preview.omitted > 0 {
+        lines.push(Line::from(vec![
+            Span::raw("    "),
+            Span::styled(
+                format!("... {} more", preview.omitted),
+                Style::default().fg(palette::TEXT_HINT),
+            ),
+        ]));
+    }
 }
 
 fn push_shell_command_lines(
@@ -3253,6 +3296,17 @@ mod tests {
             text.push('\n');
         }
         text
+    }
+
+    fn render_approval_request(
+        request: &crate::tui::approval::ApprovalRequest,
+        area: Rect,
+    ) -> String {
+        let view = crate::tui::approval::ApprovalView::new(request.clone());
+        let widget = ApprovalWidget::new(request, &view);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+        buffer_text(&buf, area)
     }
 
     fn row_text(buf: &Buffer, area: Rect, row: u16) -> String {
@@ -4902,6 +4956,175 @@ mod tests {
         assert!(rendered.contains("beta"), "{rendered}");
         assert!(rendered.contains("Dir"), "{rendered}");
         assert!(rendered.contains("/tmp/project"), "{rendered}");
+    }
+
+    #[test]
+    fn approval_card_renders_shell_ask_rule_save_preview() {
+        let request = crate::tui::approval::ApprovalRequest::new(
+            "approval-1",
+            "exec_shell",
+            "Run shell command",
+            &serde_json::json!({ "command": "cargo test --workspace" }),
+            "exec_shell:cargo-test",
+        );
+
+        let rendered = render_approval_request(&request, Rect::new(0, 0, 120, 40));
+
+        assert!(rendered.contains("s approve + save ask rule"), "{rendered}");
+        assert!(rendered.contains("Save:"), "{rendered}");
+        assert!(rendered.contains("1 ask rule"), "{rendered}");
+        assert!(
+            rendered.contains("tool=exec_shell command=cargo test --workspace"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn approval_card_renders_file_ask_rule_save_previews() {
+        let cases = [
+            (
+                "write_file",
+                serde_json::json!({
+                    "path": "src/main.rs",
+                    "content": "fn main() {}\n",
+                }),
+                "tool=write_file path=src/main.rs",
+            ),
+            (
+                "edit_file",
+                serde_json::json!({
+                    "path": "/workspace/src/lib.rs",
+                    "old_string": "old",
+                    "new_string": "new",
+                }),
+                "tool=edit_file path=src/lib.rs",
+            ),
+        ];
+
+        for (tool_name, params, expected_rule) in cases {
+            let request = crate::tui::approval::ApprovalRequest::new(
+                "approval-1",
+                tool_name,
+                "Modify a file",
+                &params,
+                &format!("{tool_name}:src"),
+            );
+
+            let rendered = render_approval_request(&request, Rect::new(0, 0, 120, 40));
+
+            assert!(rendered.contains("Save:"), "{tool_name}:\n{rendered}");
+            assert!(rendered.contains("1 ask rule"), "{tool_name}:\n{rendered}");
+            assert!(
+                rendered.contains(expected_rule),
+                "{tool_name} should preview {expected_rule}:\n{rendered}"
+            );
+        }
+    }
+
+    #[test]
+    fn approval_card_renders_apply_patch_multi_rule_save_preview() {
+        let patch = "diff --git a/src/a.rs b/src/a.rs\n\
+--- a/src/a.rs\n\
++++ b/src/a.rs\n\
+@@ -1,1 +1,1 @@\n\
+-old\n\
++new\n\
+diff --git a/src/b.rs b/src/b.rs\n\
+--- a/src/b.rs\n\
++++ b/src/b.rs\n\
+@@ -1,1 +1,1 @@\n\
+-old\n\
++new\n";
+        let request = crate::tui::approval::ApprovalRequest::new(
+            "approval-1",
+            "apply_patch",
+            "Apply a patch",
+            &serde_json::json!({ "patch": patch }),
+            "apply_patch:multi",
+        );
+
+        let rendered = render_approval_request(&request, Rect::new(0, 0, 120, 40));
+
+        assert!(rendered.contains("Save:"), "{rendered}");
+        assert!(rendered.contains("2 ask rules"), "{rendered}");
+        assert!(
+            rendered.contains("tool=apply_patch path=src/a.rs"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("tool=apply_patch path=src/b.rs"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn approval_card_truncates_apply_patch_ask_rule_save_preview() {
+        let request = crate::tui::approval::ApprovalRequest::new(
+            "approval-1",
+            "apply_patch",
+            "Apply a patch",
+            &serde_json::json!({
+                "changes": [
+                    { "path": "src/a.rs", "content": "a" },
+                    { "path": "src/b.rs", "content": "b" },
+                    { "path": "src/c.rs", "content": "c" },
+                    { "path": "src/d.rs", "content": "d" },
+                    { "path": "src/e.rs", "content": "e" }
+                ]
+            }),
+            "apply_patch:many",
+        );
+
+        let rendered = render_approval_request(&request, Rect::new(0, 0, 120, 40));
+
+        assert!(rendered.contains("5 ask rules"), "{rendered}");
+        assert!(
+            rendered.contains("tool=apply_patch path=src/a.rs"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("... 1 more"), "{rendered}");
+        assert!(
+            !rendered.contains("tool=apply_patch path=src/e.rs"),
+            "truncated rule should not render directly:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn approval_card_omits_ask_rule_save_preview_when_rule_is_unavailable() {
+        let unsafe_path = crate::tui::approval::ApprovalRequest::new(
+            "approval-1",
+            "write_file",
+            "Write a file",
+            &serde_json::json!({
+                "path": "../escape.rs",
+                "content": "unsafe\n",
+            }),
+            "write_file:escape",
+        );
+        let preflight_failed = crate::tui::approval::ApprovalRequest::new(
+            "approval-2",
+            "apply_patch",
+            "Apply a patch",
+            &serde_json::json!({ "patch": "@@ -1 +1 @@\n-old\n+new\n" }),
+            "apply_patch:invalid",
+        );
+
+        for request in [unsafe_path, preflight_failed] {
+            let rendered = render_approval_request(&request, Rect::new(0, 0, 120, 40));
+
+            assert!(
+                !rendered.contains("s approve + save ask rule"),
+                "S shortcut should stay hidden:\n{rendered}"
+            );
+            assert!(
+                !rendered.contains("Save:"),
+                "save preview should stay hidden:\n{rendered}"
+            );
+            assert!(
+                !rendered.contains("ask rule"),
+                "ask-rule details should stay hidden:\n{rendered}"
+            );
+        }
     }
 
     #[test]

@@ -153,6 +153,30 @@ pub struct ApprovalDetail {
     pub shell_lines: Option<Vec<String>>,
 }
 
+/// Human-readable preview of ask-only rules the `S` approval shortcut would
+/// append. This is intentionally derived from `persistent_ask_rules` only; the
+/// approval UI must not re-parse tool inputs such as patches.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AskRuleSavePreview {
+    pub rule_count: usize,
+    pub entries: Vec<String>,
+    pub omitted: usize,
+}
+
+impl AskRuleSavePreview {
+    #[must_use]
+    pub fn summary(&self) -> String {
+        let noun = if self.rule_count == 1 {
+            "rule"
+        } else {
+            "rules"
+        };
+        format!("{} ask {noun}", self.rule_count)
+    }
+}
+
+const ASK_RULE_SAVE_PREVIEW_MAX_ENTRIES: usize = 4;
+
 impl ApprovalRequest {
     #[cfg(test)]
     pub fn new(
@@ -240,6 +264,14 @@ impl ApprovalRequest {
     }
 
     #[must_use]
+    pub fn ask_rule_save_preview(&self) -> Option<AskRuleSavePreview> {
+        build_ask_rule_save_preview(
+            &self.persistent_ask_rules,
+            ASK_RULE_SAVE_PREVIEW_MAX_ENTRIES,
+        )
+    }
+
+    #[must_use]
     #[cfg(test)]
     pub fn ask_rule_preview(&self) -> Option<String> {
         if self.persistent_ask_rules.is_empty() {
@@ -272,6 +304,54 @@ impl ApprovalRequest {
             })
             .collect()
     }
+}
+
+#[must_use]
+fn build_ask_rule_save_preview(
+    rules: &[ToolAskRule],
+    max_entries: usize,
+) -> Option<AskRuleSavePreview> {
+    if rules.is_empty() {
+        return None;
+    }
+
+    let entries = rules
+        .iter()
+        .take(max_entries)
+        .map(format_ask_rule_save_entry)
+        .collect();
+    Some(AskRuleSavePreview {
+        rule_count: rules.len(),
+        entries,
+        omitted: rules.len().saturating_sub(max_entries),
+    })
+}
+
+#[must_use]
+fn format_ask_rule_save_entry(rule: &ToolAskRule) -> String {
+    let mut parts = vec![format!(
+        "tool={}",
+        sanitize_ask_rule_preview_value(&rule.tool)
+    )];
+    if let Some(command) = &rule.command {
+        parts.push(format!(
+            "command={}",
+            sanitize_ask_rule_preview_value(command)
+        ));
+    }
+    if let Some(path) = &rule.path {
+        parts.push(format!("path={}", sanitize_ask_rule_preview_value(path)));
+    }
+    parts.join(" ")
+}
+
+#[must_use]
+fn sanitize_ask_rule_preview_value(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
+        .replace('\t', "\\t")
 }
 
 #[must_use]
@@ -2141,6 +2221,20 @@ mod tests {
     }
 
     #[test]
+    fn ask_rule_save_preview_formats_shell_rule() {
+        let request = shell_request();
+
+        let preview = request.ask_rule_save_preview().expect("save preview");
+        assert_eq!(preview.rule_count, 1);
+        assert_eq!(preview.summary(), "1 ask rule");
+        assert_eq!(
+            preview.entries,
+            vec!["tool=exec_shell command=cargo test --workspace"]
+        );
+        assert_eq!(preview.omitted, 0);
+    }
+
+    #[test]
     fn file_ask_rule_saved_for_write_file_approval() {
         // A write_file approval offers an exact, workspace-relative file rule
         // plus a preview so `S` can persist it.
@@ -2155,6 +2249,32 @@ mod tests {
         assert!(preview.contains("[[rules]]"));
         assert!(preview.contains("tool = \"write_file\""));
         assert!(preview.contains("path = \"src/main.rs\""));
+    }
+
+    #[test]
+    fn ask_rule_save_preview_formats_write_and_edit_file_paths() {
+        let write = destructive_request();
+        let edit = ApprovalRequest::new(
+            "test-id",
+            "edit_file",
+            "Edit a file on disk",
+            &json!({"path": "/workspace/src/lib.rs"}),
+            "tool:edit_file",
+        );
+
+        assert_eq!(
+            write
+                .ask_rule_save_preview()
+                .expect("write save preview")
+                .entries,
+            vec!["tool=write_file path=src/main.rs"]
+        );
+        assert_eq!(
+            edit.ask_rule_save_preview()
+                .expect("edit save preview")
+                .entries,
+            vec!["tool=edit_file path=src/lib.rs"]
+        );
     }
 
     #[test]
@@ -2184,6 +2304,7 @@ mod tests {
         assert!(request.persistent_ask_rules.is_empty());
         assert!(!request.can_save_ask_rule());
         assert_eq!(request.ask_rule_preview(), None);
+        assert_eq!(request.ask_rule_save_preview(), None);
     }
 
     #[test]
@@ -2204,6 +2325,7 @@ mod tests {
             );
             assert!(!request.can_save_ask_rule());
             assert_eq!(request.ask_rule_preview(), None);
+            assert_eq!(request.ask_rule_save_preview(), None);
         }
     }
 
@@ -2239,6 +2361,15 @@ diff --git a/src/b.rs b/src/b.rs
             ]
         );
         assert!(request.can_save_ask_rule());
+        let preview = request.ask_rule_save_preview().expect("save preview");
+        assert_eq!(preview.summary(), "2 ask rules");
+        assert_eq!(
+            preview.entries,
+            vec![
+                "tool=apply_patch path=src/a.rs",
+                "tool=apply_patch path=src/b.rs"
+            ]
+        );
     }
 
     #[test]
@@ -2327,6 +2458,7 @@ diff --git a/src/b.rs b/src/b.rs
 
         assert!(request.persistent_ask_rules.is_empty());
         assert!(!request.can_save_ask_rule());
+        assert_eq!(request.ask_rule_save_preview(), None);
     }
 
     #[test]
@@ -2341,6 +2473,29 @@ diff --git a/src/b.rs b/src/b.rs
 
         assert!(request.persistent_ask_rules.is_empty());
         assert_eq!(request.ask_rule_preview(), None);
+        assert_eq!(request.ask_rule_save_preview(), None);
+    }
+
+    #[test]
+    fn ask_rule_save_preview_truncates_rule_list() {
+        let rules = vec![
+            ToolAskRule::file_path("apply_patch", "src/a.rs"),
+            ToolAskRule::file_path("apply_patch", "src/b.rs"),
+            ToolAskRule::file_path("apply_patch", "src/c.rs"),
+            ToolAskRule::file_path("apply_patch", "src/d.rs"),
+        ];
+
+        let preview = build_ask_rule_save_preview(&rules, 2).expect("save preview");
+        assert_eq!(preview.rule_count, 4);
+        assert_eq!(preview.summary(), "4 ask rules");
+        assert_eq!(
+            preview.entries,
+            vec![
+                "tool=apply_patch path=src/a.rs",
+                "tool=apply_patch path=src/b.rs"
+            ]
+        );
+        assert_eq!(preview.omitted, 2);
     }
 
     #[test]
