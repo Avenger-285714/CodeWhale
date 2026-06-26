@@ -184,7 +184,39 @@ impl PermissionsToml {
 
     #[must_use]
     pub fn ruleset(&self) -> Ruleset {
-        Ruleset::user(Vec::new(), Vec::new()).with_ask_rules(self.rules.clone())
+        use codewhale_execpolicy::PermissionAction;
+        let mut denied = Vec::new();
+        let mut trusted = Vec::new();
+        let mut ask_rules = Vec::new();
+
+        for rule in &self.rules {
+            match rule.action {
+                PermissionAction::Deny => {
+                    // Command-based deny rules are promoted to denied_prefixes
+                    // so they are caught by execpolicy's deny-always-wins check.
+                    if let Some(cmd) = &rule.command {
+                        denied.push(cmd.clone());
+                    }
+                    // Always keep in ask_rules for path-based and tool-only matching.
+                    ask_rules.push(rule.clone());
+                }
+                PermissionAction::Allow => {
+                    // Command-based allow rules are promoted to trusted_prefixes
+                    // for arity-aware matching.  Path-only allow rules are
+                    // handled through ask_rules (they skip the approval prompt).
+                    if let Some(cmd) = &rule.command {
+                        trusted.push(cmd.clone());
+                    }
+                    // Keep in ask_rules so path-only allow rules also work.
+                    ask_rules.push(rule.clone());
+                }
+                PermissionAction::Ask => {
+                    ask_rules.push(rule.clone());
+                }
+            }
+        }
+
+        Ruleset::user(trusted, denied).with_ask_rules(ask_rules)
     }
 }
 
