@@ -3979,16 +3979,28 @@ impl App {
         {
             return (StatusToastLevel::Error, Some(15_000), true);
         }
-        if has("saved")
-            || has("loaded")
-            || has("queued")
-            || has("found")
-            || has("enabled")
-            || has("completed")
+        // A success keyword under a negation ("not saved", "no longer
+        // found", "could not enable") is a failure the coarse keyword match
+        // would otherwise paint green. Guard it: negated success degrades to
+        // a neutral Info toast rather than a misleading Success.
+        let negated = has("not ")
+            || has("no longer")
+            || has("could not")
+            || has("couldn't")
+            || has("cannot")
+            || has("can't")
+            || has("unable");
+        if !negated
+            && (has("saved")
+                || has("loaded")
+                || has("queued")
+                || has("found")
+                || has("enabled")
+                || has("completed"))
         {
             return (StatusToastLevel::Success, Some(5_000), false);
         }
-        if has("cancelled") || has("warning") {
+        if has("cancelled") || has("canceled") || has("warning") {
             return (StatusToastLevel::Warning, Some(5_000), false);
         }
         (StatusToastLevel::Info, Some(4_000), false)

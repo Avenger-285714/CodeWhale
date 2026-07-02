@@ -8404,14 +8404,17 @@ fn mcp_ui_action_refreshes_discovery(action: &crate::tui::app::McpUiAction) -> b
 
 fn handle_shell_job_action(app: &mut App, action: crate::tui::app::ShellJobAction) {
     let Some(shell_manager) = app.runtime_services.shell_manager.clone() else {
-        add_shell_job_message(app, "Command center is not attached.".to_string());
+        add_shell_job_message(app, "No shell session is active.".to_string());
         return;
     };
 
     let mut manager = match shell_manager.lock() {
         Ok(manager) => manager,
         Err(_) => {
-            add_shell_job_message(app, "Command center lock is poisoned.".to_string());
+            add_shell_job_message(
+                app,
+                "Shell tracking hit an internal error — restart CodeWhale to recover.".to_string(),
+            );
             return;
         }
     };
@@ -11241,7 +11244,7 @@ pub(crate) fn request_foreground_shell_background(app: &mut App) {
     }
 
     let Some(shell_manager) = app.runtime_services.shell_manager.clone() else {
-        app.status_message = Some("Shell manager is not attached".to_string());
+        app.status_message = Some("No shell session is active.".to_string());
         return;
     };
 
@@ -11251,7 +11254,9 @@ pub(crate) fn request_foreground_shell_background(app: &mut App) {
             app.status_message = Some("Moving current shell command to /jobs...".to_string());
         }
         Err(_) => {
-            app.status_message = Some("Shell manager lock is poisoned".to_string());
+            app.status_message = Some(
+                "Shell tracking hit an internal error — restart CodeWhale to recover.".to_string(),
+            );
         }
     }
 }

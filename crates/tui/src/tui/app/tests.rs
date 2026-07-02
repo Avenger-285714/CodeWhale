@@ -3331,3 +3331,26 @@ fn advance_fallback_cloud_primary_can_hop_cloud_to_local_to_cloud() {
         "cloud-primary chains should not trigger local/private blocking: {reason}"
     );
 }
+
+#[test]
+fn status_classifier_does_not_paint_negated_success_green() {
+    use super::StatusToastLevel;
+    // Failures that happen to contain a success keyword ("saved", "found")
+    // must not toast green (#3757 UX review).
+    let (level, _, _) = App::classify_status_text("Custom provider was not saved.");
+    assert_ne!(level, StatusToastLevel::Success);
+    let (level, _, _) = App::classify_status_text("Queued message not found");
+    assert_ne!(level, StatusToastLevel::Success);
+    let (level, _, _) = App::classify_status_text("Could not enable subagents");
+    assert_ne!(level, StatusToastLevel::Success);
+
+    // Genuine successes still classify green.
+    let (level, _, _) = App::classify_status_text("Fleet profile saved: reviewer.toml");
+    assert_eq!(level, StatusToastLevel::Success);
+
+    // Both cancel spellings classify as Warning.
+    let (level, _, _) = App::classify_status_text("Turn canceled");
+    assert_eq!(level, StatusToastLevel::Warning);
+    let (level, _, _) = App::classify_status_text("Turn cancelled");
+    assert_eq!(level, StatusToastLevel::Warning);
+}
